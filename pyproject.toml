@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "community-bot"
+version = "0.1.0"
+description = "Discord community bot with AWS AgentCore / Ollama backends"
+authors = [ { name = "Community Bot" } ]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+	"discord.py>=2.3.2",
+	"boto3>=1.34.0",
+	"python-dotenv>=1.0.0",
+	"aiohttp>=3.9.0",
+	"httpx>=0.27.0",
+	"backoff>=2.2.1",
+	"pydantic>=2.7.0"
+]
+
+[project.optional-dependencies]
+dev = ["ruff", "mypy", "types-requests"]
+
+[project.scripts]
+community-bot = "community_bot.main:run"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+strict = false
+
+{\n  "error": "File placeholder was empty before; ensuring correct content."\n}
+name = "community-bot"
