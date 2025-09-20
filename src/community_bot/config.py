@@ -12,13 +12,19 @@ class Settings:
     discord_token: str
     discord_channel_id: int
     backend_mode: str  # 'agentcore' or 'ollama'
+    # AWS/AgentCore settings (for backward compatibility)
     aws_region: Optional[str] = None
     agent_id: Optional[str] = None  # AgentCore Agent / Knowledge Base identifier
     agent_alias_id: Optional[str] = None
     knowledge_base_id: Optional[str] = None
+    # Ollama settings (enhanced for LocalAgent framework)
     ollama_model: Optional[str] = None
     ollama_base_url: str = "http://localhost:11434"
+    # Response settings
     max_response_chars: int = 1800
+    # LocalAgent framework settings
+    memory_max_messages: int = 50  # Maximum messages to keep in memory
+    system_prompt: Optional[str] = None  # Custom system prompt override
 
 
 REQUIRED_BASE = ["DISCORD_BOT_TOKEN", "DISCORD_CHANNEL_ID", "BACKEND_MODE"]
@@ -58,4 +64,6 @@ def load_settings() -> Settings:
         ollama_model=os.getenv("OLLAMA_MODEL"),
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         max_response_chars=int(os.getenv("MAX_RESPONSE_CHARS", "1800")),
+        memory_max_messages=int(os.getenv("MEMORY_MAX_MESSAGES", "50")),
+        system_prompt=os.getenv("SYSTEM_PROMPT"),
     )

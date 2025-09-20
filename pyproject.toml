@@ -33,6 +33,3 @@ target-version = "py310"
 python_version = "3.10"
 warn_unused_configs = true
 strict = false
-
-{\n  "error": "File placeholder was empty before; ensuring correct content."\n}
-name = "community-bot"

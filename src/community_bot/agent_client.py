@@ -13,53 +13,44 @@ except ImportError:  # pragma: no cover - optional when using ollama only
     boto3 = None  # type: ignore
 
 from .config import Settings
+from .local_agent import LocalAgent, ConversationMemory, OllamaModel
 
 
 class AgentClient:
+    """Entry point for the LocalAgent framework with backward compatibility."""
+    
     def __init__(self, settings: Settings):
         self.settings = settings
-        if settings.backend_mode == "agentcore" and boto3 is None:
-            raise RuntimeError("boto3 is required for AgentCore backend mode")
+        
+        # Initialize LocalAgent components
+        if settings.backend_mode == "ollama":
+            self.model = OllamaModel(settings)
+            self.memory = ConversationMemory(max_messages=settings.memory_max_messages)
+            self.agent = LocalAgent(self.model, self.memory, system_prompt=settings.system_prompt)
+        elif settings.backend_mode == "agentcore":
+            if boto3 is None:
+                raise RuntimeError("boto3 is required for AgentCore backend mode")
+            # For AgentCore mode, we'll still use the legacy implementation
+            # This maintains backward compatibility while the new architecture is being developed
+            self.agent = None
+        else:
+            raise ValueError(f"Unknown backend mode: {settings.backend_mode}")
 
     async def chat(self, user_message: str) -> AsyncGenerator[str, None]:
-        if self.settings.backend_mode == "agentcore":
+        """Chat with the agent using the configured backend."""
+        if self.settings.backend_mode == "ollama" and self.agent:
+            # Use new LocalAgent framework
+            async for chunk in self.agent.chat(user_message):
+                yield chunk
+        elif self.settings.backend_mode == "agentcore":
+            # Use legacy AgentCore implementation
             async for chunk in self._chat_agentcore(user_message):
                 yield chunk
         else:
-            async for chunk in self._chat_ollama(user_message):
-                yield chunk
-
-    async def _chat_ollama(self, user_message: str) -> AsyncGenerator[str, None]:
-        url = f"{self.settings.ollama_base_url}/api/chat"
-        payload = {
-            "model": self.settings.ollama_model,
-            "messages": [
-                {"role": "system", "content": "You are a helpful assistant for a Discord community."},
-                {"role": "user", "content": user_message},
-            ],
-            "stream": True,
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as resp:
-                resp.raise_for_status()
-                async for line_bytes in resp.content:
-                    if not line_bytes:
-                        continue
-                    try:
-                        line = line_bytes.decode("utf-8").strip()
-                        if not line:
-                            continue
-                        data = json.loads(line)
-                        if data.get("done"):
-                            break
-                        message = data.get("message", {})
-                        content = message.get("content")
-                        if content:
-                            yield content
-                    except Exception:
-                        continue
+            raise RuntimeError("Invalid backend configuration")
 
     async def _chat_agentcore(self, user_message: str) -> AsyncGenerator[str, None]:
+        """Legacy AgentCore implementation for backward compatibility."""
         # Placeholder implementation; AWS AgentCore Python SDK specifics may differ.
         # We'll call Bedrock runtime / AgentRuntime via boto3's bedrock-agent-runtime client.
         loop = asyncio.get_event_loop()
@@ -67,6 +58,7 @@ class AgentClient:
         yield response_text
 
     def _invoke_agent_sync(self, user_message: str) -> str:
+        """Synchronous AgentCore invocation for legacy support."""
         client = boto3.client("bedrock-agent-runtime", region_name=self.settings.aws_region)
         # Basic invocation; adjust per actual AgentCore API (pseudo example based on docs pattern)
         kwargs = {
@@ -91,6 +83,17 @@ class AgentClient:
             except Exception:
                 return str(body)
         return json.dumps(resp)[:4000]
+    
+    def clear_memory(self) -> None:
+        """Clear conversation memory if using LocalAgent."""
+        if self.agent and hasattr(self.agent, 'clear_memory'):
+            self.agent.clear_memory()
+    
+    def get_memory_size(self) -> int:
+        """Get current memory size if using LocalAgent."""
+        if self.agent and hasattr(self.agent, 'get_memory_size'):
+            return self.agent.get_memory_size()
+        return 0
 
 
 async def collect_response(client: AgentClient, user_message: str, max_chars: int) -> str:
