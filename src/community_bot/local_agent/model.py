@@ -8,6 +8,9 @@ from typing import AsyncGenerator, Dict, List
 import aiohttp
 
 from ..config import Settings
+from ..logging_config import get_logger
+
+logger = get_logger("community_bot.model.ollama")
 
 
 class OllamaModel:
@@ -23,8 +26,16 @@ class OllamaModel:
         self.base_url = settings.ollama_base_url
         self.model_name = settings.ollama_model
         
+        logger.info(f"Initializing OllamaModel")
+        logger.debug(f"Base URL: {self.base_url}")
+        logger.debug(f"Model name: {self.model_name}")
+        
         if not self.model_name:
-            raise ValueError("OLLAMA_MODEL must be specified in settings")
+            error_msg = "OLLAMA_MODEL must be specified in settings"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        logger.info("OllamaModel initialization complete")
     
     async def chat(self, history: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
         """Send conversation history to Ollama and stream the response.
@@ -45,35 +56,59 @@ class OllamaModel:
             "stream": True,
         }
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as resp:
-                resp.raise_for_status()
-                
-                async for line_bytes in resp.content:
-                    if not line_bytes:
-                        continue
+        logger.debug(f"Starting chat request to {url}")
+        logger.debug(f"History length: {len(history)} messages")
+        logger.debug(f"Model: {self.model_name}")
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                logger.debug("Making HTTP POST request to Ollama")
+                async with session.post(url, json=payload) as resp:
+                    logger.debug(f"Ollama response status: {resp.status}")
+                    resp.raise_for_status()
                     
-                    try:
-                        line = line_bytes.decode("utf-8").strip()
-                        if not line:
+                    chunk_count = 0
+                    total_content = ""
+                    
+                    async for line_bytes in resp.content:
+                        if not line_bytes:
                             continue
                         
-                        data = json.loads(line)
-                        
-                        # Check if streaming is complete
-                        if data.get("done"):
-                            break
-                        
-                        # Extract content from the message
-                        message = data.get("message", {})
-                        content = message.get("content")
-                        
-                        if content:
-                            yield content
+                        try:
+                            line = line_bytes.decode("utf-8").strip()
+                            if not line:
+                                continue
                             
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        # Skip malformed lines
-                        continue
+                            data = json.loads(line)
+                            
+                            # Check if streaming is complete
+                            if data.get("done"):
+                                logger.debug("Ollama streaming completed")
+                                break
+                            
+                            # Extract content from the message
+                            message = data.get("message", {})
+                            content = message.get("content")
+                            
+                            if content:
+                                chunk_count += 1
+                                total_content += content
+                                logger.debug(f"Received chunk {chunk_count}: {len(content)} characters")
+                                yield content
+                                
+                        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                            logger.warning(f"Skipping malformed line: {e}")
+                            # Skip malformed lines
+                            continue
+                    
+                    logger.info(f"Chat stream completed: {chunk_count} chunks, {len(total_content)} total characters")
+                    
+        except aiohttp.ClientError as e:
+            logger.error(f"HTTP error communicating with Ollama: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error during Ollama chat: {e}", exc_info=True)
+            raise
     
     async def chat_complete(self, history: List[Dict[str, str]]) -> str:
         """Get a complete response from the model (non-streaming).
@@ -84,7 +119,10 @@ class OllamaModel:
         Returns:
             Complete response string from the model
         """
+        logger.debug("Starting complete chat request")
         chunks = []
         async for chunk in self.chat(history):
             chunks.append(chunk)
-        return "".join(chunks)
+        response = "".join(chunks)
+        logger.info(f"Complete chat finished: {len(response)} characters")
+        return response

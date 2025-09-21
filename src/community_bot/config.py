@@ -25,6 +25,8 @@ class Settings:
     # LocalAgent framework settings
     memory_max_messages: int = 50  # Maximum messages to keep in memory
     system_prompt: Optional[str] = None  # Custom system prompt override
+    # Logging settings
+    log_level: str = "INFO"  # Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 
 
 REQUIRED_BASE = ["DISCORD_BOT_TOKEN", "DISCORD_CHANNEL_ID", "BACKEND_MODE"]
@@ -66,4 +68,5 @@ def load_settings() -> Settings:
         max_response_chars=int(os.getenv("MAX_RESPONSE_CHARS", "1800")),
         memory_max_messages=int(os.getenv("MEMORY_MAX_MESSAGES", "50")),
         system_prompt=os.getenv("SYSTEM_PROMPT"),
+        log_level=os.getenv("LOG_LEVEL", "INFO"),
     )
