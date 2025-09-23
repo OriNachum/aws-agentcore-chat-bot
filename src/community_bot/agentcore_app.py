@@ -18,7 +18,16 @@ from community_bot.logging_config import setup_logging, get_logger
 
 # --- Model Configuration ---
 # This is where we can switch between Ollama and Bedrock
+# When called from agent_client with agentcore mode, we'll use Ollama with the settings configuration
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama")  # 'ollama' or 'bedrock'
+
+# Allow overriding via function parameter for agent_client integration
+_force_provider = None
+
+def set_provider(provider: str):
+    """Set the provider for this session (used by agent_client)."""
+    global _force_provider
+    _force_provider = provider
 
 # Load application settings
 settings = load_settings()
@@ -34,7 +43,10 @@ def get_agent():
     """Get or create the agent instance."""
     global _agent
     if _agent is None:
-        if LLM_PROVIDER == "ollama":
+        # Use forced provider if set, otherwise use environment variable
+        provider = _force_provider or LLM_PROVIDER
+        
+        if provider == "ollama":
             # Assumes Ollama is running locally
             model_name = settings.ollama_model or "llama3"  # Default fallback
             base_url = settings.ollama_base_url or "http://localhost:11434"  # Default fallback
@@ -43,7 +55,7 @@ def get_agent():
                 host=base_url,
                 model_id=model_name
             )
-        elif LLM_PROVIDER == "bedrock":
+        elif provider == "bedrock":
             # Configure for Bedrock (e.g., Claude)
             logger.info("Configuring Bedrock model")
             model = BedrockModel(
@@ -52,8 +64,8 @@ def get_agent():
                 streaming=True
             )
         else:
-            logger.error(f"Unknown LLM provider: {LLM_PROVIDER}")
-            raise ValueError(f"Unknown LLM provider: {LLM_PROVIDER}")
+            logger.error(f"Unknown LLM provider: {provider}")
+            raise ValueError(f"Unknown LLM provider: {provider}")
 
         _agent = Agent(model=model)
         logger.info("Initialized Strands Agent with configured model")
