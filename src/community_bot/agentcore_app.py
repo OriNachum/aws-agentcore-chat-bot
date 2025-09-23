@@ -85,7 +85,7 @@ def get_gateway_client():
 
 def query_knowledge_base_via_gateway(gateway_client, query: str) -> Optional[str]:
     """
-    Query knowledge base through AgentCore Gateway.
+    Query knowledge base through AgentCore Gateway or direct API.
     
     Args:
         gateway_client: The gateway client instance
@@ -95,25 +95,127 @@ def query_knowledge_base_via_gateway(gateway_client, query: str) -> Optional[str
         Knowledge base response or None if no results
     """
     try:
-        # This is a placeholder implementation
-        # In a real scenario, this would call specific knowledge base APIs
-        # configured through the gateway client
+        logger.debug(f"Querying knowledge base with: {query[:100]}...")
         
-        # Example: Call a knowledge base API endpoint
-        kb_endpoint = os.environ.get("KNOWLEDGE_BASE_ENDPOINT")
-        if not kb_endpoint:
-            logger.debug("No knowledge base endpoint configured")
-            return None
+        # Try AgentCore Gateway approach first
+        kb_gateway_id = os.environ.get("KB_GATEWAY_ID")
+        kb_gateway_endpoint = os.environ.get("KB_GATEWAY_ENDPOINT")
         
-        # Simulate knowledge base query
-        # In practice, this would make an actual API call through the gateway
-        logger.debug(f"Querying knowledge base with: {query}")
+        if kb_gateway_id and kb_gateway_endpoint and gateway_client:
+            try:
+                # Use AgentCore Gateway MCP tools
+                result = _query_via_agentcore_gateway(gateway_client, kb_gateway_id, query)
+                if result:
+                    logger.debug("Successfully queried via AgentCore Gateway")
+                    return result
+            except Exception as gateway_error:
+                logger.warning(f"AgentCore Gateway query failed, trying direct approach: {gateway_error}")
         
-        # Placeholder return - replace with actual implementation
-        return f"Knowledge base context for: {query}"
+        # Fallback to direct API approach
+        kb_direct_endpoint = os.environ.get("KB_DIRECT_ENDPOINT")
+        if kb_direct_endpoint:
+            result = _query_via_direct_api(kb_direct_endpoint, query)
+            if result:
+                logger.debug("Successfully queried via direct API")
+                return result
+        
+        logger.debug("No knowledge base configured or available")
+        return None
         
     except Exception as e:
         logger.error(f"Error querying knowledge base: {e}")
+        return None
+
+def _query_via_agentcore_gateway(gateway_client, gateway_id: str, query: str) -> Optional[str]:
+    """
+    Query knowledge base using AgentCore Gateway MCP tools.
+    
+    Args:
+        gateway_client: AgentCore gateway client
+        gateway_id: Gateway ID
+        query: Search query
+    
+    Returns:
+        Query result or None
+    """
+    try:
+        # Use MCP tools via AgentCore Gateway
+        tool_result = gateway_client.invoke_tool(
+            gateway_id=gateway_id,
+            tool_name="kb-query-tool",
+            parameters={
+                "query": query,
+                "max_results": 5,
+                "include_metadata": True
+            }
+        )
+        
+        if tool_result and tool_result.get("content"):
+            return tool_result["content"]
+        
+        return None
+        
+    except Exception as e:
+        logger.warning(f"AgentCore Gateway query failed: {e}")
+        return None
+
+def _query_via_direct_api(kb_endpoint: str, query: str) -> Optional[str]:
+    """
+    Query knowledge base using direct API calls.
+    
+    Args:
+        kb_endpoint: Knowledge base API endpoint
+        query: Search query
+    
+    Returns:
+        Query result or None
+    """
+    try:
+        import requests
+        
+        kb_api_key = os.environ.get("KB_DIRECT_API_KEY")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {kb_api_key}" if kb_api_key else ""
+        }
+        
+        # Standard knowledge base query format
+        payload = {
+            "query": query,
+            "max_results": 5,
+            "include_metadata": True
+        }
+        
+        response = requests.post(
+            f"{kb_endpoint}/query",
+            json=payload,
+            headers=headers,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            
+            # Extract relevant context from response
+            if result.get("results"):
+                context_items = []
+                for item in result["results"][:3]:  # Use top 3 results
+                    content = item.get("content", item.get("text", ""))
+                    if content:
+                        context_items.append(content)
+                
+                if context_items:
+                    return "\n".join(context_items)
+            
+            # Fallback to direct content
+            return result.get("content", result.get("answer"))
+        
+        else:
+            logger.warning(f"Knowledge base API returned status {response.status_code}: {response.text}")
+            return None
+        
+    except Exception as e:
+        logger.warning(f"Direct API query failed: {e}")
         return None
 
 def setup_knowledge_base_integration():
@@ -121,7 +223,11 @@ def setup_knowledge_base_integration():
     Setup knowledge base integration using AgentCore Gateway.
     
     This function configures connections to external knowledge bases
-    and APIs that can augment the agent's responses.
+    and APIs that can augment the agent's responses by converting them
+    into MCP (Model Context Protocol) tools via AgentCore Gateway.
+    
+    Returns:
+        bool: True if setup successful, False otherwise
     """
     if not AGENTCORE_SERVICES_AVAILABLE:
         logger.info("AgentCore services not available, skipping knowledge base setup")
@@ -133,26 +239,96 @@ def setup_knowledge_base_integration():
         return False
     
     try:
-        # Example: Configure knowledge base endpoints
-        # This would typically involve setting up API endpoints, authentication, etc.
-        knowledge_base_config = {
-            "knowledge_bases": [
+        # Check for knowledge base configuration
+        kb_endpoint = os.environ.get("KNOWLEDGE_BASE_ENDPOINT")
+        kb_api_key = os.environ.get("KNOWLEDGE_BASE_API_KEY")
+        
+        if not kb_endpoint:
+            logger.info("No KNOWLEDGE_BASE_ENDPOINT configured, skipping knowledge base setup")
+            logger.info("To enable knowledge base: set KNOWLEDGE_BASE_ENDPOINT environment variable")
+            return False
+        
+        logger.info(f"Setting up knowledge base integration with endpoint: {kb_endpoint}")
+        
+        # Create AgentCore Gateway for knowledge base API
+        # This converts your knowledge base API into MCP tools
+        gateway_config = {
+            "name": "knowledge-base-gateway",
+            "description": "Gateway for knowledge base queries",
+            "targets": [
                 {
-                    "name": "primary_kb",
+                    "name": "kb-query-tool",
                     "type": "api",
-                    "endpoint": os.environ.get("KNOWLEDGE_BASE_ENDPOINT"),
-                    "auth_required": True
+                    "endpoint": kb_endpoint,
+                    "description": "Query knowledge base for relevant information",
+                    "authentication": {
+                        "type": "api_key" if kb_api_key else "none",
+                        "api_key": kb_api_key
+                    }
                 }
             ]
         }
         
-        # Register knowledge base with gateway
-        # gateway_client.register_knowledge_source(knowledge_base_config)
-        logger.info("Knowledge base integration configured")
+        # Register gateway with AgentCore
+        try:
+            gateway_response = gateway_client.create_gateway(gateway_config)
+            logger.info(f"Knowledge base gateway created successfully: {gateway_response.get('gatewayId', 'Unknown ID')}")
+            
+            # Store gateway info for later use
+            os.environ["KB_GATEWAY_ID"] = gateway_response.get('gatewayId', '')
+            os.environ["KB_GATEWAY_ENDPOINT"] = gateway_response.get('endpoint', '')
+            
+        except Exception as gateway_error:
+            logger.warning(f"Failed to create gateway, using direct API approach: {gateway_error}")
+            # Fallback to direct API integration
+            return _setup_direct_kb_integration(kb_endpoint, kb_api_key)
+        
+        logger.info("Knowledge base integration configured successfully via AgentCore Gateway")
         return True
         
     except Exception as e:
         logger.error(f"Failed to setup knowledge base integration: {e}")
+        return False
+
+def _setup_direct_kb_integration(kb_endpoint: str, kb_api_key: Optional[str] = None):
+    """
+    Fallback function to setup direct knowledge base integration 
+    when AgentCore Gateway is not available.
+    
+    Args:
+        kb_endpoint: Knowledge base API endpoint
+        kb_api_key: Optional API key for authentication
+    
+    Returns:
+        bool: True if setup successful
+    """
+    try:
+        logger.info("Setting up direct knowledge base integration (fallback mode)")
+        
+        # Store configuration for direct usage
+        os.environ["KB_DIRECT_ENDPOINT"] = kb_endpoint
+        if kb_api_key:
+            os.environ["KB_DIRECT_API_KEY"] = kb_api_key
+        
+        # Test connectivity to knowledge base
+        import requests
+        headers = {"Authorization": f"Bearer {kb_api_key}"} if kb_api_key else {}
+        
+        # Simple health check
+        try:
+            response = requests.get(f"{kb_endpoint}/health", headers=headers, timeout=10)
+            if response.status_code == 200:
+                logger.info("Knowledge base endpoint is accessible")
+            else:
+                logger.warning(f"Knowledge base endpoint returned status: {response.status_code}")
+        except requests.exceptions.RequestException as req_error:
+            logger.warning(f"Could not verify knowledge base connectivity: {req_error}")
+        
+        logger.info("Direct knowledge base integration configured")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to setup direct knowledge base integration: {e}")
         return False
 
 def get_agent():
@@ -185,6 +361,13 @@ def get_agent():
 
         _agent = Agent(model=model)
         logger.info("Initialized Strands Agent with configured model")
+        
+        # Setup knowledge base integration
+        kb_setup_success = setup_knowledge_base_integration()
+        if kb_setup_success:
+            logger.info("✅ Knowledge base integration enabled")
+        else:
+            logger.info("ℹ️  Knowledge base integration not available (see logs above for details)")
     
     return _agent
 
