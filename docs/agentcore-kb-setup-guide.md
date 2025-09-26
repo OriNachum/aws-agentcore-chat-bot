@@ -1,27 +1,91 @@
 # AgentCore Knowledge Base Setup Guide
 
-This guide shows how to set up and use AgentCore knowledge base integration with your Strands agents.
+This guide shows how to set up and use AgentCore knowledge base integration with your Strands agents. You have several options depending on your infrastructure and requirements.
 
-## Quick Setup for Developers
+## Knowledge Base Options
 
-### 1. Environment Variables
+### Option 1: AWS Bedrock Knowledge Base (Recommended for AWS users)
+**Best for**: AWS-native deployments, fully managed solution
 
-Set these environment variables to enable knowledge base integration:
+**Do you need S3 beforehand?** Yes, you need to:
+1. Create an S3 bucket for your documents
+2. Upload your knowledge documents to S3
+3. Create a Bedrock Knowledge Base pointing to that S3 bucket
 
-```bash
-# Required: Your knowledge base API endpoint
-$env:KNOWLEDGE_BASE_ENDPOINT = "https://your-kb-api.example.com"
+```powershell
+# 1. Create S3 bucket
+aws s3 mb s3://my-community-bot-kb --region us-east-1
 
-# Optional: API key for authentication (if your KB requires it)
-$env:KNOWLEDGE_BASE_API_KEY = "your-api-key-here"
+# 2. Upload documents
+aws s3 cp ./docs/ s3://my-community-bot-kb/docs/ --recursive
 
-# Optional: Enable AgentCore mode for deployment
-$env:AGENTCORE_MODE = "true"
+# 3. Create Knowledge Base via AWS Console, then:
+$env:KNOWLEDGE_BASE_ENDPOINT = "bedrock-agent-runtime"
+$env:KNOWLEDGE_BASE_ID = "YOUR_KB_ID_FROM_AWS_CONSOLE"
+$env:AWS_REGION = "us-east-1"
 ```
 
-### 2. Test Knowledge Base Integration
+### Option 2: Pinecone Vector Database
+**Best for**: Multi-cloud, high-performance vector search (like Pinecone)
 
-```bash
+**No S3 needed!** Just sign up at pinecone.io and create an index.
+
+```powershell
+# After creating Pinecone account and index:
+$env:KNOWLEDGE_BASE_ENDPOINT = "https://your-index-xxxxx.svc.region.pinecone.io"
+$env:KNOWLEDGE_BASE_API_KEY = "your-pinecone-api-key"
+```
+
+### Option 3: Local Development (Chroma/Qdrant)
+**Best for**: Development and testing without external dependencies
+
+```powershell
+# Install and start Chroma
+uv add chromadb
+chroma run --host localhost --port 8000
+
+# Configure
+$env:KNOWLEDGE_BASE_ENDPOINT = "http://localhost:8000"
+```
+
+### Option 4: Custom Knowledge Base API
+**Best for**: Existing knowledge systems
+
+Your API should support this format:
+```json
+POST /query
+{
+  "query": "search terms",
+  "max_results": 5
+}
+```
+
+```powershell
+$env:KNOWLEDGE_BASE_ENDPOINT = "https://your-custom-api.com/api/v1"
+$env:KNOWLEDGE_BASE_API_KEY = "your-api-key"  # if needed
+```
+
+## Quick Setup Steps
+
+### 1. Choose Your Knowledge Base Option (see above)
+
+### 2. Set Environment Variables
+
+```powershell
+# Required: Your knowledge base endpoint
+$env:KNOWLEDGE_BASE_ENDPOINT = "your-chosen-endpoint-from-above"
+
+# Optional: API key (if your KB requires authentication)
+$env:KNOWLEDGE_BASE_API_KEY = "your-api-key"
+
+# Optional: For AWS Bedrock Knowledge Base
+$env:KNOWLEDGE_BASE_ID = "your-bedrock-kb-id"
+$env:AWS_REGION = "us-east-1"
+```
+
+### 3. Test Knowledge Base Integration
+
+```powershell
 # Run the agent locally to test KB integration
 cd C:\Git\mike-et-al-community-bot
 python src/community_bot/agentcore_app.py
@@ -31,15 +95,18 @@ Look for these log messages:
 - ✅ `Knowledge base integration enabled` - Success!
 - ℹ️ `Knowledge base integration not available` - Check your setup
 
-### 3. Deploy to AgentCore (Optional)
+### 4. Deploy to AgentCore (Optional)
 
-```bash
+```powershell
 # Set AgentCore mode
 $env:AGENTCORE_MODE = "true"
 
 # Deploy using AgentCore CLI
 agentcore configure -e src/community_bot/agentcore_app.py
 agentcore launch
+
+# Test deployed agent
+agentcore invoke '{"prompt": "Tell me about our documentation", "session_id": "test"}'
 ```
 
 ## How It Works
@@ -69,6 +136,43 @@ agentcore launch
 4. Enhanced prompt sent to LLM
 5. Agent responds with knowledge-augmented answer
 
+## Detailed Setup Examples
+
+### AWS Bedrock Knowledge Base Setup
+
+**Yes, you need S3 first!** Here's the complete setup:
+
+```powershell
+# 1. Create S3 bucket
+aws s3 mb s3://my-bot-knowledge-base
+
+# 2. Upload your documents (PDFs, text files, etc.)
+aws s3 cp ./company-docs/ s3://my-bot-knowledge-base/docs/ --recursive
+
+# 3. Go to AWS Console > Amazon Bedrock > Knowledge bases
+# 4. Click "Create knowledge base"
+# 5. Connect to your S3 bucket
+# 6. Wait for indexing to complete
+# 7. Note the Knowledge Base ID
+
+# 8. Configure your agent
+$env:KNOWLEDGE_BASE_ENDPOINT = "bedrock-agent-runtime"
+$env:KNOWLEDGE_BASE_ID = "ABC123XYZ"  # From step 6
+$env:AWS_REGION = "us-east-1"
+```
+
+### Pinecone Setup (No S3 needed)
+
+```powershell
+# 1. Sign up at https://pinecone.io
+# 2. Create a new index in the Pinecone console
+# 3. Get your API key from settings
+# 4. Configure:
+
+$env:KNOWLEDGE_BASE_ENDPOINT = "https://your-index-12345.svc.us-east1-gcp.pinecone.io"
+$env:KNOWLEDGE_BASE_API_KEY = "your-pinecone-api-key"
+```
+
 ## Supported Knowledge Base APIs
 
 Your knowledge base API should support:
@@ -79,6 +183,7 @@ POST /query
 Content-Type: application/json
 Authorization: Bearer {api_key}  # Optional
 
+Request:
 {
   "query": "user question",
   "max_results": 5,
@@ -92,7 +197,92 @@ Authorization: Bearer {api_key}  # Optional
   "results": [
     {
       "content": "relevant information...",
-      "metadata": {...}
+      "metadata": {"source": "doc.pdf", "score": 0.95}
+    }
+  ]
+}
+```
+
+## Troubleshooting
+
+### ❌ "Knowledge base integration not available"
+
+**Check these items:**
+
+1. **Environment variable set?**
+   ```powershell
+   echo $env:KNOWLEDGE_BASE_ENDPOINT
+   # Should show your endpoint URL
+   ```
+
+2. **Network connectivity?**
+   ```powershell
+   # Test if endpoint is reachable
+   curl $env:KNOWLEDGE_BASE_ENDPOINT/health
+   ```
+
+3. **API authentication?**
+   ```powershell
+   # Check API key is set (if required)
+   echo $env:KNOWLEDGE_BASE_API_KEY
+   ```
+
+### ❌ "AgentCore Gateway query failed"
+
+**This is normal!** The system will fallback to direct API calls. Common reasons:
+- AgentCore services not available in your region
+- AWS permissions not set up
+- Gateway creation failed
+
+**Resolution**: The fallback mode still works perfectly for knowledge base queries.
+
+### ❌ "Direct API query failed"
+
+Check your knowledge base API:
+
+1. **Correct endpoint format?**
+   ```
+   ✅ https://api.example.com/v1
+   ❌ https://api.example.com/v1/query  (don't include /query)
+   ```
+
+2. **API responds to POST /query?**
+   ```powershell
+   curl -X POST "$env:KNOWLEDGE_BASE_ENDPOINT/query" `
+     -H "Content-Type: application/json" `
+     -H "Authorization: Bearer $env:KNOWLEDGE_BASE_API_KEY" `
+     -d '{"query": "test", "max_results": 1}'
+   ```
+
+3. **Check API rate limits and quotas**
+
+### ❌ "No relevant knowledge found"
+
+- Check if your documents are properly indexed
+- Try different search terms
+- Verify document format is supported by your knowledge base
+
+## Recommendations by Use Case
+
+| Use Case | Recommended Option | Why |
+|----------|-------------------|-----|
+| **AWS Production** | Bedrock Knowledge Base | Fully managed, secure, scales automatically |
+| **Multi-cloud** | Pinecone | High performance, cloud-agnostic |  
+| **Development** | Local Chroma | No external dependencies, fast iteration |
+| **Existing Systems** | Custom API | Integrate with what you already have |
+
+## Next Steps
+
+1. **Choose your option** from the table above
+2. **Follow the setup steps** for your chosen knowledge base
+3. **Test locally** with `python src/community_bot/agentcore_app.py`
+4. **Deploy to production** with AgentCore when ready
+
+## Support
+
+- Check the logs for detailed error messages
+- Test your knowledge base API independently first
+- Start with local development options before moving to production
     }
   ]
 }
