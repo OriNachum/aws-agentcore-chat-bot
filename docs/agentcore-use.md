@@ -45,6 +45,27 @@ Your existing configuration files will be used:
 - `settings.ollama_model` - Model name (default: "llama3")
 - `settings.ollama_base_url` - Ollama server URL (default: "http://localhost:11434")
 
+### Prompt Profiles
+
+Local and AgentCore paths now share a file-based prompt system. Profiles live under `agents/<profile>/` with:
+
+- `<profile>.system.md` (required) — initial system message
+- `<profile>.user.md` (optional) — primer inserted as the first user message
+- Additional files like `<profile>.tool.md` or `<profile>.safety.md` (optional) for future tooling
+
+Key environment variables:
+
+```env
+SYSTEM_PROMPT="Inline override for the system prompt"
+PROMPT_PROFILE=default
+PROMPT_ROOT=./agents
+PROMPT_USER_ROLE=user
+```
+
+- `SYSTEM_PROMPT` overrides the file while still allowing primers and extras from disk.
+- Relative `PROMPT_ROOT` paths are resolved against the working directory, so repos can bundle prompts alongside code.
+- Adjust `PROMPT_USER_ROLE` if a primer should appear as `system`, `assistant`, or another supported role.
+
 ## Usage
 
 ### Running the Interactive Agent

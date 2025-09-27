@@ -85,8 +85,13 @@ OLLAMA_BASE_URL=http://localhost:11434
 # LocalAgent framework settings
 MEMORY_MAX_MESSAGES=50
 SYSTEM_PROMPT="Custom system prompt"
+PROMPT_PROFILE=default
+PROMPT_ROOT=../agents
+PROMPT_USER_ROLE=user
 MAX_RESPONSE_CHARS=1800
 ```
+
+Place prompt files under the repository `agents/` directory. When running examples from this folder, relative `PROMPT_ROOT=../agents` keeps the loader pointed at the shared prompts.
 
 ## Testing Without External Dependencies
 
