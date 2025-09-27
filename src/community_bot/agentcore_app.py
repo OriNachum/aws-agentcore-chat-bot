@@ -2,6 +2,8 @@
 
 import os
 import sys
+import requests
+
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -170,9 +172,7 @@ def _query_via_direct_api(kb_endpoint: str, query: str) -> Optional[str]:
     Returns:
         Query result or None
     """
-    try:
-        import requests
-        
+    try:        
         kb_api_key = os.environ.get("KB_DIRECT_API_KEY")
         headers = {
             "Content-Type": "application/json",
@@ -311,7 +311,6 @@ def _setup_direct_kb_integration(kb_endpoint: str, kb_api_key: Optional[str] = N
             os.environ["KB_DIRECT_API_KEY"] = kb_api_key
         
         # Test connectivity to knowledge base
-        import requests
         headers = {"Authorization": f"Bearer {kb_api_key}"} if kb_api_key else {}
         
         # Simple health check
@@ -361,13 +360,6 @@ def get_agent():
 
         _agent = Agent(model=model)
         logger.info("Initialized Strands Agent with configured model")
-        
-        # Setup knowledge base integration
-        kb_setup_success = setup_knowledge_base_integration()
-        if kb_setup_success:
-            logger.info("✅ Knowledge base integration enabled")
-        else:
-            logger.info("ℹ️  Knowledge base integration not available (see logs above for details)")
     
     return _agent
 
