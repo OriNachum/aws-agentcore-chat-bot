@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import AsyncGenerator
 
 from .config import Settings
@@ -71,7 +72,7 @@ class AgentClient:
             logger.debug("Using new AgentCore Strands framework")
             # Use new AgentCore Strands framework
             try:
-                response = chat_with_agent(user_message)
+                response = await asyncio.to_thread(chat_with_agent, user_message)
                 logger.info(f"AgentCore response received: {len(response)} characters")
                 yield response
             except Exception as e:

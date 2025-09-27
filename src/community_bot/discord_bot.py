@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import List, Tuple
+from contextlib import suppress
+from typing import Any, Awaitable, List, Tuple, cast
 
 import discord
 
@@ -61,18 +62,58 @@ class CommunityBot(discord.Client):
             # We're in a thread - collect history and respond in the same thread
             logger.debug(f"Message is in thread: {message.channel.name}")
             thread_history = await self._get_thread_history(message.channel)
+            await self._prepare_thread(message.channel)
             thinking_msg = await message.channel.send("Processing... 🤖")
         else:
-            # We're in the main channel - create a new thread for the response
-            logger.debug("Message is in main channel - will create thread")
+            # We're in the main channel - create (or reuse) a thread for the response
+            logger.debug("Message is in main channel - will create (or reuse) thread")
             thread_name = f"Chat with {message.author.display_name}"
             if len(message.content) > 50:
                 thread_name = f"Re: {message.content[:50]}..."
-            
-            # Create thread from the user's message
-            response_channel = await message.create_thread(name=thread_name)
+
+            existing_thread = await self._resolve_existing_thread(message)
+            if existing_thread:
+                response_channel = existing_thread
+                logger.info(
+                    "Reusing existing thread for message",
+                    extra={"thread_id": existing_thread.id, "message_id": message.id},
+                )
+            else:
+                try:
+                    response_channel = await message.create_thread(name=thread_name)
+                    logger.debug(f"Created thread: {thread_name}")
+                except discord.HTTPException as exc:
+                    if exc.code == 160004:
+                        logger.info(
+                            "Thread already exists; attempting to reuse",
+                            extra={"message_id": message.id},
+                        )
+                        response_channel = await self._resolve_existing_thread(message)
+                        if not response_channel:
+                            logger.error(
+                                "Thread already existed but could not be resolved",
+                                extra={"message_id": message.id},
+                                exc_info=True,
+                            )
+                            await message.reply(
+                                "I already have a thread for this message but couldn't reopen it."
+                                " Please continue in the existing thread."
+                            )
+                            return
+                    else:
+                        logger.error(
+                            f"Failed to create thread: {exc}",
+                            extra={"message_id": message.id},
+                            exc_info=True,
+                        )
+                        await message.reply(
+                            "Sorry, I couldn't start a thread for this conversation."
+                            " Please try again in a moment."
+                        )
+                        return
+
+            await self._prepare_thread(response_channel)
             thinking_msg = await response_channel.send("Processing... 🤖")
-            logger.debug(f"Created thread: {thread_name}")
         
         try:
             logger.debug("Calling agent client to process message")
@@ -344,3 +385,51 @@ class CommunityBot(discord.Client):
             extra={"chunks": len(chunks)},
         )
         return chunks[0]
+
+    async def _prepare_thread(self, thread: discord.Thread) -> None:
+        if thread is None:
+            return
+
+        if getattr(thread, "archived", False):
+            try:
+                await thread.edit(archived=False)
+                logger.debug(
+                    "Unarchived thread for response",
+                    extra={"thread_id": thread.id},
+                )
+            except discord.Forbidden:
+                logger.warning(
+                    "Insufficient permissions to unarchive thread",
+                    extra={"thread_id": getattr(thread, "id", "unknown")},
+                )
+            except discord.HTTPException as exc:
+                logger.warning(
+                    "Failed to unarchive thread",
+                    extra={"thread_id": getattr(thread, "id", "unknown")},
+                    exc_info=True,
+                )
+
+        join_method = getattr(thread, "join", None)
+        if callable(join_method):
+            with suppress(discord.HTTPException, discord.Forbidden):
+                await cast(Awaitable[Any], join_method())
+
+    async def _resolve_existing_thread(self, message: discord.Message) -> discord.Thread | None:
+        thread = getattr(message, "thread", None)
+        if thread:
+            return thread
+
+        channel = message.channel
+        fetch_message = getattr(channel, "fetch_message", None)
+        if callable(fetch_message):
+            try:
+                refreshed = await cast(Awaitable[Any], fetch_message(message.id))
+            except (discord.HTTPException, discord.NotFound):
+                logger.debug(
+                    "Unable to fetch message while resolving thread",
+                    extra={"message_id": message.id},
+                )
+            else:
+                return getattr(refreshed, "thread", None)
+
+        return None

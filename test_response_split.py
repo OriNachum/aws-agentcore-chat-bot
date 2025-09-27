@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests for response splitting and message dispatch logic."""
 
-import asyncio
 import sys
 import unittest
 from pathlib import Path
@@ -9,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 # Add src directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+import discord
 
 from community_bot.config import Settings
 from community_bot.discord_bot import CommunityBot
@@ -121,9 +122,16 @@ class MessageDispatchTests(unittest.IsolatedAsyncioTestCase):
         message.author = author
         message.content = "Hello bot, please demonstrate splitting."
         message.channel = channel
+        message.thread = None
         message.create_thread = AsyncMock()
+        message.reply = AsyncMock()
+        channel.fetch_message = AsyncMock(return_value=message)
 
         response_channel = MagicMock()
+        response_channel.id = 99999
+        response_channel.archived = False
+        response_channel.join = AsyncMock()
+        response_channel.edit = AsyncMock()
         thinking_message = MagicMock()
         thinking_message.edit = AsyncMock()
         response_channel.send = AsyncMock(return_value=thinking_message)
@@ -134,6 +142,7 @@ class MessageDispatchTests(unittest.IsolatedAsyncioTestCase):
         await self.bot.on_message(message)
 
         message.create_thread.assert_awaited_once()
+        response_channel.join.assert_awaited_once()
         thinking_message.edit.assert_awaited_once_with(content=expected_chunks[0])
 
         # First send call is the placeholder, the rest should be follow-up chunks
@@ -149,6 +158,51 @@ class MessageDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await_calls)
         self.assertEqual(await_calls[0].args[0], self.bot.agent_client)
         self.assertEqual(await_calls[0].args[2], self.settings.max_response_chars)
+        channel.fetch_message.assert_awaited_once()
+        message.reply.assert_not_awaited()
+
+    @patch("community_bot.discord_bot.collect_response", new_callable=AsyncMock)
+    async def test_on_message_reuses_existing_thread(self, mock_collect_response: AsyncMock):
+        mock_collect_response.return_value = "Short response"
+
+        author = MagicMock()
+        author.bot = False
+        author.id = 321
+        author.display_name = "Tester"
+
+        existing_thread = MagicMock(spec=discord.Thread)
+        existing_thread.id = 555
+        existing_thread.archived = False
+        existing_thread.join = AsyncMock()
+        existing_thread.edit = AsyncMock()
+
+        placeholder_message = MagicMock()
+        placeholder_message.edit = AsyncMock()
+        existing_thread.send = AsyncMock(return_value=placeholder_message)
+
+        channel = MagicMock()
+        channel.id = self.settings.discord_channel_id
+        channel.fetch_message = AsyncMock(return_value=MagicMock(thread=existing_thread))
+
+        message = MagicMock()
+        message.author = author
+        message.content = "Hello again"
+        message.channel = channel
+        message.thread = existing_thread
+        message.create_thread = AsyncMock()
+        message.reply = AsyncMock()
+
+        expected_chunks = self.bot._split_response("Short response")
+
+        await self.bot.on_message(message)
+
+        message.create_thread.assert_not_awaited()
+        existing_thread.join.assert_awaited_once()
+        existing_thread.send.assert_awaited_once_with("Processing... 🤖")
+        placeholder_message.edit.assert_awaited_once_with(content=expected_chunks[0])
+        mock_collect_response.assert_awaited_once()
+        message.reply.assert_not_awaited()
+        channel.fetch_message.assert_not_awaited()
 
 
 if __name__ == "__main__":
