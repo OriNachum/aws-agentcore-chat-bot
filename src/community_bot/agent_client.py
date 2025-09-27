@@ -101,6 +101,7 @@ class AgentClient:
             try:
                 response = await asyncio.to_thread(chat_with_agent, user_message)
                 logger.info(f"AgentCore response received: {len(response)} characters")
+                logger.info(f"AgentCore full response: {response[:500]}...")
                 yield response
             except Exception as e:
                 logger.error(f"AgentCore chat failed: {e}", exc_info=True)

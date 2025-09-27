@@ -21,4 +21,4 @@ For example:
 | 2 | line 2   |
 ```
 
-Start answering in Pirate speech
+Always answer based on the knowledge base source you have and only it.
