@@ -78,8 +78,48 @@ uv run community-bot
 | OLLAMA_MODEL | Ollama | Local model name (e.g., llama3.1) |
 | OLLAMA_BASE_URL | Ollama optional | Defaults http://localhost:11434 |
 | LOG_LEVEL | Optional | Default INFO |
-| MAX_REPLY_CHARS | Optional | Max chunk size (<1900) default 1800 |
+| MAX_RESPONSE_CHARS | Optional | Max chunk size (<1900) default 1800 |
+| SYSTEM_PROMPT | Optional | Inline system prompt override (bypasses file) |
+| PROMPT_PROFILE | Optional | Prompt folder to load (default `default`) |
+| PROMPT_ROOT | Optional | Directory containing prompt profiles (default `<repo>/agents`) |
+| PROMPT_USER_ROLE | Optional | Role used for primer message (default `user`) |
 | MESSAGE_PREFIX | Optional | Prepended to every reply |
+
+## Prompt Profiles
+
+Prompts now live on disk under the `agents/` directory and are grouped by **profile**. Each profile folder contains at least a `<profile>.system.md` file and can optionally include `<profile>.user.md` (primer) plus other structured prompts (`<profile>.tool.md`, `<profile>.safety.md`, etc.). The bot selects a profile via the `PROMPT_PROFILE` environment variable (default: `default`).
+
+- System prompt precedence: `SYSTEM_PROMPT` env var → `<profile>.system.md`
+- Optional primer: `<profile>.user.md` is injected before the live user message using role `PROMPT_USER_ROLE`
+- Additional prompt files are exposed via the loader for future tooling integrations
+
+### Creating a profile directory
+
+```pwsh
+$profile = "community-support"
+$root = Join-Path (Get-Location) "agents"
+New-Item -ItemType Directory -Path (Join-Path $root $profile) -Force | Out-Null
+Set-Content -Path (Join-Path $root $profile "$profile.system.md") -Value "You are a helpful assistant for our community."
+Set-Content -Path (Join-Path $root $profile "$profile.user.md") -Value "Please ask follow-up questions before answering if details are missing."
+```
+
+```bash
+profile=community-support
+root="agents"
+mkdir -p "$root/$profile"
+cat <<'EOF' > "$root/$profile/$profile.system.md"
+You are a helpful assistant for our community.
+EOF
+cat <<'EOF' > "$root/$profile/$profile.user.md"
+Please ask follow-up questions before answering if details are missing.
+EOF
+```
+
+When running locally, ensure your `.env` (or shell) includes:
+
+```
+PROMPT_PROFILE=community-support
+```
 
 ## RAG Knowledge Base (High Level)
 

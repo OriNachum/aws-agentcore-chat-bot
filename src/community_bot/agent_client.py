@@ -7,6 +7,7 @@ from .config import Settings
 from .local_agent import LocalAgent, ConversationMemory, OllamaModel
 from .logging_config import get_logger
 from .agentcore_app import chat_with_agent
+from .prompt_loader import load_prompt_bundle
 
 logger = get_logger("community_bot.agent")
 
@@ -27,10 +28,24 @@ class AgentClient:
             
             self.model = OllamaModel(settings)
             self.memory = ConversationMemory(max_messages=settings.memory_max_messages)
+            self.prompt_bundle = load_prompt_bundle(settings)
+            logger.info(
+                "Loaded prompt profile '%s'%s",
+                self.prompt_bundle.profile,
+                " with user primer" if self.prompt_bundle.user else "",
+            )
+            if self.prompt_bundle.extras:
+                logger.debug(
+                    "Prompt extras discovered for profile '%s': %s",
+                    self.prompt_bundle.profile,
+                    ", ".join(sorted(self.prompt_bundle.extras.keys())),
+                )
+
             self.agent = LocalAgent(
-                self.model, 
-                self.memory, 
-                system_prompt=settings.system_prompt or "You are a helpful Discord community assistant."
+                self.model,
+                self.memory,
+                settings,
+                prompt_bundle=self.prompt_bundle,
             )
             logger.info("Ollama backend initialized successfully")
             
@@ -48,6 +63,18 @@ class AgentClient:
             
             # Set agent to a special marker to indicate we're using agentcore
             self.agent = "agentcore"
+            self.prompt_bundle = load_prompt_bundle(settings)
+            logger.info(
+                "Loaded prompt profile '%s'%s for AgentCore backend",
+                self.prompt_bundle.profile,
+                " with user primer" if self.prompt_bundle.user else "",
+            )
+            if self.prompt_bundle.extras:
+                logger.debug(
+                    "Prompt extras discovered for profile '%s': %s",
+                    self.prompt_bundle.profile,
+                    ", ".join(sorted(self.prompt_bundle.extras.keys())),
+                )
             logger.info("AgentCore backend with Strands framework initialized successfully")
         else:
             error_msg = f"Unknown backend mode: {settings.backend_mode}"
@@ -74,6 +101,7 @@ class AgentClient:
             try:
                 response = await asyncio.to_thread(chat_with_agent, user_message)
                 logger.info(f"AgentCore response received: {len(response)} characters")
+                logger.info(f"AgentCore full response: {response[:500]}...")
                 yield response
             except Exception as e:
                 logger.error(f"AgentCore chat failed: {e}", exc_info=True)
@@ -88,6 +116,7 @@ class AgentClient:
         logger.debug("Clearing conversation memory")
         if self.settings.backend_mode == "ollama" and isinstance(self.agent, LocalAgent):
             self.agent.clear_memory()
+            self.prompt_bundle = self.agent.prompt_bundle
             logger.info("Conversation memory cleared successfully")
         else:
             logger.debug("No memory to clear (AgentCore mode or no agent)")
@@ -100,6 +129,13 @@ class AgentClient:
             return size
         logger.debug("Memory size not available (AgentCore mode or no agent)")
         return 0
+
+    def get_prompt_profile(self) -> str | None:
+        """Return the active prompt profile for diagnostics."""
+        if self.settings.backend_mode == "ollama":
+            bundle = getattr(self, "prompt_bundle", None)
+            return bundle.profile if bundle else None
+        return None
 
 
 async def collect_response(

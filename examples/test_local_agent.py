@@ -27,7 +27,10 @@ async def test_local_agent():
         ollama_base_url="http://localhost:11434",
         max_response_chars=1800,
         memory_max_messages=10,
-        system_prompt="You are a helpful AI assistant for testing purposes."
+        system_prompt="You are a helpful AI assistant for testing purposes.",
+        prompt_profile="default",
+        prompt_root=(Path(__file__).parent.parent / "agents").resolve(),
+        prompt_user_role="user",
     )
     
     try:
@@ -35,7 +38,7 @@ async def test_local_agent():
         print("📝 Initializing LocalAgent components...")
         model = OllamaModel(settings)
         memory = ConversationMemory(max_messages=settings.memory_max_messages)
-        agent = LocalAgent(model, memory, system_prompt=settings.system_prompt)
+        agent = LocalAgent(model, memory, settings)
         
         print(f"✅ LocalAgent initialized with memory limit: {settings.memory_max_messages}")
         print(f"📊 Current memory size: {agent.get_memory_size()}")
@@ -70,7 +73,8 @@ async def test_local_agent():
         print(f"Current conversation history has {len(memory.get_history())} messages")
         
         # Test clearing memory
-        agent.clear_memory("You are now a pirate assistant. Speak like a pirate!")
+        agent.settings.system_prompt = "You are now a pirate assistant. Speak like a pirate!"
+        agent.clear_memory()
         print(f"🔄 Memory cleared and reset. New size: {agent.get_memory_size()}")
         
         # Test with new personality

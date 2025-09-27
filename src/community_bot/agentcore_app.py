@@ -1,15 +1,18 @@
 # src/community_bot/agentcore_app.py
 
+import json
 import os
 import sys
 import requests
 
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional, TypedDict
 
-from strands import Agent
+from strands import Agent, tool
 from strands.models.ollama import OllamaModel
 from strands.models import BedrockModel
+from strands.types.tools import ToolContext
+from typing_extensions import NotRequired
 
 # AgentCore imports
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
@@ -31,6 +34,7 @@ sys.path.insert(0, str(src_path))
 
 from community_bot.config import load_settings
 from community_bot.logging_config import setup_logging, get_logger
+from community_bot.prompt_loader import load_prompt_bundle
 
 # --- Model Configuration ---
 # This is where we can switch between Ollama and Bedrock
@@ -50,6 +54,25 @@ settings = load_settings()
 setup_logging(settings.log_level)
 logger = get_logger("community_bot.agentcore_app")
 
+try:
+    _PROMPT_BUNDLE = load_prompt_bundle(settings)
+    logger.info(
+        "Loaded prompt profile '%s'%s for AgentCore backend",
+        _PROMPT_BUNDLE.profile,
+        " with user primer" if _PROMPT_BUNDLE.user else "",
+    )
+    if _PROMPT_BUNDLE.extras:
+        logger.debug(
+            "Prompt extras discovered for profile '%s': %s",
+            _PROMPT_BUNDLE.profile,
+            ", ".join(sorted(_PROMPT_BUNDLE.extras.keys())),
+        )
+except Exception:  # Propagate after logging for visibility
+    logger.exception("Failed to load prompt bundle for AgentCore backend")
+    raise
+
+_PROMPT_USER_ROLE = (settings.prompt_user_role or "user").strip() or "user"
+
 logger.info(f"Initializing AgentCore app with LLM provider: {LLM_PROVIDER}")
 logger.info(f"AgentCore services available: {AGENTCORE_SERVICES_AVAILABLE}")
 
@@ -60,6 +83,64 @@ agentcore_app = BedrockAgentCoreApp()
 _agent = None
 _memory_client = None
 _gateway_client = None
+
+
+class KnowledgeBaseResponse(TypedDict):
+    """Structured representation of knowledge base results."""
+
+    content: str
+    source: NotRequired[str]
+    raw: NotRequired[Any]
+
+
+def _truncate_for_discord(text: str, limit: int = 1900) -> str:
+    """Discord hard-limits messages to ~2000 characters. Trim responsibly."""
+
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
+def _compose_agentcore_prompt(
+    user_message: str,
+    *,
+    memory_context: Optional[str] = None,
+    knowledge_context: Optional[str] = None,
+) -> str:
+    """Compose the final prompt for AgentCore mode using the loaded bundle."""
+
+    sections: list[str] = []
+
+    system_prompt = (_PROMPT_BUNDLE.system or "").strip()
+    if system_prompt:
+        sections.append(f"[System Instructions]\n{system_prompt}")
+
+    user_primer = (_PROMPT_BUNDLE.user or "").strip()
+    if user_primer:
+        role_label = _PROMPT_USER_ROLE.title()
+        sections.append(f"[{role_label} Primer]\n{user_primer}")
+
+    if _PROMPT_BUNDLE.extras:
+        for name in sorted(_PROMPT_BUNDLE.extras.keys()):
+            content = (_PROMPT_BUNDLE.extras.get(name) or "").strip()
+            if not content:
+                continue
+            label = name.replace("_", " ").strip() or name
+            sections.append(f"[{label}]\n{content}")
+
+    if memory_context:
+        memory_text = memory_context.strip()
+        if memory_text:
+            sections.append(f"[Conversation Memory]\n{memory_text}")
+
+    if knowledge_context:
+        knowledge_text = knowledge_context.strip()
+        if knowledge_text:
+            sections.append(f"[Relevant Knowledge]\n{knowledge_text}")
+
+    sections.append(f"[{_PROMPT_USER_ROLE.title()} Message]\n{user_message}")
+
+    return "\n\n".join(sections)
 
 def get_memory_client():
     """Get or create the memory client for knowledge persistence."""
@@ -85,7 +166,13 @@ def get_gateway_client():
             _gateway_client = None
     return _gateway_client
 
-def query_knowledge_base_via_gateway(gateway_client, query: str) -> Optional[str]:
+def query_knowledge_base_via_gateway(
+    gateway_client,
+    query: str,
+    *,
+    max_results: int = 5,
+    include_metadata: bool = True,
+) -> Optional[KnowledgeBaseResponse]:
     """
     Query knowledge base through AgentCore Gateway or direct API.
     
@@ -106,20 +193,41 @@ def query_knowledge_base_via_gateway(gateway_client, query: str) -> Optional[str
         if kb_gateway_id and kb_gateway_endpoint and gateway_client:
             try:
                 # Use AgentCore Gateway MCP tools
-                result = _query_via_agentcore_gateway(gateway_client, kb_gateway_id, query)
-                if result:
+                result = _query_via_agentcore_gateway(
+                    gateway_client,
+                    kb_gateway_id,
+                    query,
+                    max_results=max_results,
+                    include_metadata=include_metadata,
+                )
+                content = _extract_content_from_result(result)
+                if content:
                     logger.debug("Successfully queried via AgentCore Gateway")
-                    return result
+                    return {
+                        "content": content,
+                        "source": "gateway",
+                        "raw": result,
+                    }
             except Exception as gateway_error:
                 logger.warning(f"AgentCore Gateway query failed, trying direct approach: {gateway_error}")
         
         # Fallback to direct API approach
         kb_direct_endpoint = os.environ.get("KB_DIRECT_ENDPOINT")
         if kb_direct_endpoint:
-            result = _query_via_direct_api(kb_direct_endpoint, query)
-            if result:
+            result = _query_via_direct_api(
+                kb_direct_endpoint,
+                query,
+                max_results=max_results,
+                include_metadata=include_metadata,
+            )
+            content = _extract_content_from_result(result)
+            if content:
                 logger.debug("Successfully queried via direct API")
-                return result
+                return {
+                    "content": content,
+                    "source": "direct",
+                    "raw": result,
+                }
         
         logger.debug("No knowledge base configured or available")
         return None
@@ -128,7 +236,14 @@ def query_knowledge_base_via_gateway(gateway_client, query: str) -> Optional[str
         logger.error(f"Error querying knowledge base: {e}")
         return None
 
-def _query_via_agentcore_gateway(gateway_client, gateway_id: str, query: str) -> Optional[str]:
+def _query_via_agentcore_gateway(
+    gateway_client,
+    gateway_id: str,
+    query: str,
+    *,
+    max_results: int = 5,
+    include_metadata: bool = True,
+) -> Optional[Any]:
     """
     Query knowledge base using AgentCore Gateway MCP tools.
     
@@ -142,26 +257,32 @@ def _query_via_agentcore_gateway(gateway_client, gateway_id: str, query: str) ->
     """
     try:
         # Use MCP tools via AgentCore Gateway
+        parameters: Dict[str, Any] = {
+            "query": query,
+            "include_metadata": include_metadata,
+        }
+        if max_results is not None:
+            parameters["max_results"] = max_results
+
         tool_result = gateway_client.invoke_tool(
             gateway_id=gateway_id,
             tool_name="kb-query-tool",
-            parameters={
-                "query": query,
-                "max_results": 5,
-                "include_metadata": True
-            }
+            parameters=parameters,
         )
         
-        if tool_result and tool_result.get("content"):
-            return tool_result["content"]
-        
-        return None
+        return tool_result if tool_result else None
         
     except Exception as e:
         logger.warning(f"AgentCore Gateway query failed: {e}")
         return None
 
-def _query_via_direct_api(kb_endpoint: str, query: str) -> Optional[str]:
+def _query_via_direct_api(
+    kb_endpoint: str,
+    query: str,
+    *,
+    max_results: int = 5,
+    include_metadata: bool = True,
+) -> Optional[Any]:
     """
     Query knowledge base using direct API calls.
     
@@ -182,8 +303,8 @@ def _query_via_direct_api(kb_endpoint: str, query: str) -> Optional[str]:
         # Standard knowledge base query format
         payload = {
             "query": query,
-            "max_results": 5,
-            "include_metadata": True
+            "max_results": max_results,
+            "include_metadata": include_metadata,
         }
         
         response = requests.post(
@@ -195,21 +316,10 @@ def _query_via_direct_api(kb_endpoint: str, query: str) -> Optional[str]:
         
         if response.status_code == 200:
             result = response.json()
-            
-            # Extract relevant context from response
-            if result.get("results"):
-                context_items = []
-                for item in result["results"][:3]:  # Use top 3 results
-                    content = item.get("content", item.get("text", ""))
-                    if content:
-                        context_items.append(content)
-                
-                if context_items:
-                    return "\n".join(context_items)
-            
-            # Fallback to direct content
-            return result.get("content", result.get("answer"))
-        
+            if isinstance(result.get("results"), list) and max_results is not None:
+                result = result.copy()
+                result["results"] = result["results"][:max_results]
+            return result
         else:
             logger.warning(f"Knowledge base API returned status {response.status_code}: {response.text}")
             return None
@@ -217,6 +327,113 @@ def _query_via_direct_api(kb_endpoint: str, query: str) -> Optional[str]:
     except Exception as e:
         logger.warning(f"Direct API query failed: {e}")
         return None
+
+
+def _extract_content_from_result(result: Any) -> Optional[str]:
+    """Best-effort extraction of human-readable content from varied KB responses."""
+
+    if not result:
+        return None
+
+    if isinstance(result, str):
+        return result.strip() or None
+
+    if isinstance(result, dict):
+        for key in ("content", "text", "answer"):
+            value = result.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        if isinstance(result.get("results"), list):
+            snippets: list[str] = []
+            for item in result["results"]:
+                if not isinstance(item, dict):
+                    continue
+                snippet = item.get("content") or item.get("text")
+                if isinstance(snippet, str) and snippet.strip():
+                    snippets.append(snippet.strip())
+            if snippets:
+                return "\n\n".join(snippets)
+
+    return None
+
+
+@tool(
+    name="kb-query-tool",
+    description="Query the configured knowledge base for relevant context",
+    context=True,
+)
+def kb_query_tool(
+    query: str,
+    max_results: int = 5,
+    include_metadata: bool = True,
+    tool_context: ToolContext | None = None,
+) -> Dict[str, Any]:
+    """Return knowledge base snippets that match the provided query."""
+
+    trimmed_query = query.strip()
+    if not trimmed_query:
+        logger.info("kb-query-tool received an empty query")
+        return {
+            "status": "error",
+            "content": [{"text": "Knowledge base query cannot be empty."}],
+        }
+
+    logger.info(
+        "kb-query-tool invoked | query='%s' | max_results=%s | include_metadata=%s",
+        trimmed_query[:100],
+        max_results,
+        include_metadata,
+    )
+
+    gateway_client = get_gateway_client() if AGENTCORE_SERVICES_AVAILABLE else None
+    result = query_knowledge_base_via_gateway(
+        gateway_client,
+        trimmed_query,
+        max_results=max_results,
+        include_metadata=include_metadata,
+    )
+
+    content_value = (result or {}).get("content") if result else None
+
+    if not content_value:
+        logger.info("kb-query-tool found no results for query: %s", trimmed_query[:100])
+        return {
+            "status": "error",
+            "content": [{"text": "No knowledge base entries matched the query."}],
+        }
+
+    response_text = content_value.strip()
+
+    source_value = result.get("source") if result else None
+    if source_value:
+        response_text = f"Source: {source_value}\n\n" + response_text
+
+    raw_value = result.get("raw") if result else None
+    if include_metadata and raw_value is not None:
+        try:
+            raw_json = json.dumps(raw_value, indent=2)
+            response_text = "\n\n".join(
+                [response_text, f"```json\n{_truncate_for_discord(raw_json, 1500)}\n```"]
+            )
+        except (TypeError, ValueError):
+            logger.debug("kb-query-tool could not serialize raw metadata for logging")
+
+    response_text = _truncate_for_discord(response_text)
+
+    if tool_context:
+        logger.debug(
+            "kb-query-tool completed | tool_use_id=%s | response_chars=%s",
+            tool_context.tool_use.get("toolUseId"),
+            len(response_text),
+        )
+    else:
+        logger.debug("kb-query-tool completed | response_chars=%s", len(response_text))
+
+    return {
+        "status": "success",
+        "content": [{"text": response_text}],
+    }
 
 def setup_knowledge_base_integration():
     """
@@ -358,7 +575,9 @@ def get_agent():
             logger.error(f"Unknown LLM provider: {provider}")
             raise ValueError(f"Unknown LLM provider: {provider}")
 
-        _agent = Agent(model=model)
+        tools = [kb_query_tool]
+
+        _agent = Agent(model=model, tools=tools)
         logger.info("Initialized Strands Agent with configured model")
     
     return _agent
@@ -380,8 +599,8 @@ def chat_with_agent(user_message: str, session_id: Optional[str] = None, use_kno
     try:
         agent = get_agent()
         
-        # Enhanced message with memory and knowledge base context
-        enhanced_message = user_message
+        memory_context: Optional[str] = None
+        knowledge_context: Optional[str] = None
         
         # Add memory context if available
         if session_id and AGENTCORE_SERVICES_AVAILABLE:
@@ -391,26 +610,43 @@ def chat_with_agent(user_message: str, session_id: Optional[str] = None, use_kno
                     # Retrieve conversation history for context
                     memory_context = memory_client.get_session_memory(session_id)
                     if memory_context:
-                        enhanced_message = f"Previous context: {memory_context}\n\nCurrent message: {user_message}"
-                        logger.info("Added memory context to message")
+                        logger.info("Including memory context in AgentCore prompt")
                 except Exception as e:
                     logger.warning(f"Failed to retrieve memory context: {e}")
         
         # Add knowledge base context if available and requested
-        if use_knowledge_base and AGENTCORE_SERVICES_AVAILABLE:
-            gateway_client = get_gateway_client()
-            if gateway_client:
+        if use_knowledge_base:
+            gateway_client = get_gateway_client() if AGENTCORE_SERVICES_AVAILABLE else None
+            direct_available = os.environ.get("KB_DIRECT_ENDPOINT") is not None
+
+            if gateway_client or direct_available:
                 try:
-                    # Query knowledge base for relevant information
-                    # This would typically involve calling your knowledge base API
-                    # through the gateway client
-                    knowledge_context = query_knowledge_base_via_gateway(gateway_client, user_message)
-                    if knowledge_context:
-                        enhanced_message = f"{enhanced_message}\n\nRelevant knowledge: {knowledge_context}"
-                        logger.info("Added knowledge base context to message")
+                    knowledge_result = query_knowledge_base_via_gateway(
+                        gateway_client,
+                        user_message,
+                    )
+
+                    if knowledge_result and knowledge_result.get("content"):
+                        knowledge_context = knowledge_result["content"]
+                        logger.info(
+                            "Including knowledge base context in AgentCore prompt (source=%s)",
+                            knowledge_result.get("source", "unknown"),
+                        )
+                        raw_snapshot = knowledge_result.get("raw")
+                        if raw_snapshot is not None:
+                            logger.debug(
+                                "Knowledge base raw snapshot: %s",
+                                str(raw_snapshot)[:500],
+                            )
                 except Exception as e:
                     logger.warning(f"Failed to retrieve knowledge base context: {e}")
         
+        enhanced_message = _compose_agentcore_prompt(
+            user_message=user_message,
+            memory_context=memory_context,
+            knowledge_context=knowledge_context,
+        )
+
         # Process with the agent
         result = agent(enhanced_message)
         response_text = str(result)  # AgentResult has __str__ method
