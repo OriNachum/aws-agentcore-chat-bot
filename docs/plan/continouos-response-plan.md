@@ -6,7 +6,7 @@ We need to extend `CommunityBot` so it can deliver long agent responses that exc
 ## Functional Requirements
 - When the formatted response exceeds `settings.max_response_chars`, split it into multiple Discord messages.
 - Prefer splitting on the last newline that keeps a chunk within the limit; if none exist, hard-wrap at the limit.
-- Every chunk after the first must start with `"</ continuing>\n"`.
+- Every chunk after the first must start with `"***</ continuing>***\n\n"`.
 - Handle fenced code blocks (` ``` `). If a chunk ends inside a code block, close the fence in that chunk and reopen it at the beginning of the next.
 - Preserve current threading behavior (respond in existing thread or newly created thread) and the existing "Processing..." placeholder message flow.
 

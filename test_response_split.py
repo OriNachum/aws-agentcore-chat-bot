@@ -47,7 +47,7 @@ class SplitResponseTests(unittest.TestCase):
         # Ensure chunks respect limit and the second chunk starts with the continuation marker
         for chunk in chunks:
             self.assertLessEqual(len(chunk), bot.settings.max_response_chars)
-        self.assertTrue(chunks[1].startswith("</ continuing>\n"))
+        self.assertTrue(chunks[1].startswith("***</ continuing>***\n\n"))
 
     def test_chunks_terminate_on_newline_when_possible(self):
         limit = 60
@@ -63,8 +63,8 @@ class SplitResponseTests(unittest.TestCase):
 
         def strip_wrappers(chunk: str) -> str:
             content = chunk
-            if content.startswith("</ continuing>\n"):
-                content = content[len("</ continuing>\n") :]
+            if content.startswith("***</ continuing>***\n\n"):
+                content = content[len("***</ continuing>***\n\n") :]
             return content
 
         payloads = [strip_wrappers(chunk) for chunk in chunks]
@@ -100,7 +100,7 @@ class SplitResponseTests(unittest.TestCase):
 
         self.assertGreater(len(chunks), 1)
         self.assertTrue(chunks[0].rstrip().endswith("```"))
-        self.assertTrue(chunks[1].startswith("</ continuing>\n```python"))
+        self.assertTrue(chunks[1].startswith("***</ continuing>***\n\n```python"))
         for chunk in chunks:
             self.assertLessEqual(len(chunk), bot.settings.max_response_chars)
 
