@@ -14,15 +14,28 @@ This guide shows how to set up and use AgentCore knowledge base integration with
 
 ```powershell
 # 1. Create S3 bucket
-aws s3 mb s3://my-community-bot-kb --region us-east-1
+aws s3 mb s3://my-kb --region us-east-1
 
 # 2. Upload documents
-aws s3 cp ./docs/ s3://my-community-bot-kb/docs/ --recursive
+aws s3 cp ./docs/ s3://my-kb/docs/ --recursive
 
 # 3. Create Knowledge Base via AWS Console, then:
 $env:KNOWLEDGE_BASE_ENDPOINT = "bedrock-agent-runtime"
 $env:KNOWLEDGE_BASE_ID = "YOUR_KB_ID_FROM_AWS_CONSOLE"
 $env:AWS_REGION = "us-east-1"
+```
+
+#### Troubleshoot
+aws gives:
+```
+make_bucket failed: s3://my-kb An error occurred (AccessDenied) when calling the CreateBucket operation: User: arn:aws:iam::435593604218:user/cli-user-amd is not authorized to perform: s3:CreateBucket on resource: "arn:aws:s3:::my-kb" because no identity-based policy allows the s3:CreateBucket action
+```
+Missing policy / permissions.
+Add to usergroup or give permissions.
+
+After:
+```
+make_bucket: my-kb
 ```
 
 ### Option 2: Pinecone Vector Database
