@@ -152,12 +152,13 @@ class MessageDispatchTests(unittest.IsolatedAsyncioTestCase):
         follow_up_payloads = [call.args[0] for call in send_calls[1:]]
         self.assertEqual(follow_up_payloads, expected_chunks[1:])
 
-        # Ensure mock collect_response was invoked with the agent client and max char limit
+    # Ensure mock collect_response was invoked with the expected arguments
         mock_collect_response.assert_awaited_once()
         await_calls = mock_collect_response.await_args_list
         self.assertTrue(await_calls)
         self.assertEqual(await_calls[0].args[0], self.bot.agent_client)
-        self.assertEqual(await_calls[0].args[2], self.settings.max_response_chars)
+        self.assertEqual(await_calls[0].args[1], message.content)
+        self.assertEqual(len(await_calls[0].args), 2)
         channel.fetch_message.assert_awaited_once()
         message.reply.assert_not_awaited()
 

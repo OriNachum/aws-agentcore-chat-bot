@@ -123,9 +123,7 @@ class CommunityBot(discord.Client):
                 context_message = f"Previous conversation:\n{thread_history}\n\nNew message: {message.content}"
                 logger.debug(f"Including thread history: {len(thread_history)} characters")
             
-            response_text = await collect_response(
-                self.agent_client, context_message, self.settings.max_response_chars
-            )
+            response_text = await collect_response(self.agent_client, context_message)
             logger.info(f"Received response from agent: {len(response_text)} characters")
             logger.debug(f"Response preview: {response_text[:200]}...")
             
