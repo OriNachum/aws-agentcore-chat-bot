@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import AsyncGenerator
 
 from .config import Settings
@@ -71,7 +72,7 @@ class AgentClient:
             logger.debug("Using new AgentCore Strands framework")
             # Use new AgentCore Strands framework
             try:
-                response = chat_with_agent(user_message)
+                response = await asyncio.to_thread(chat_with_agent, user_message)
                 logger.info(f"AgentCore response received: {len(response)} characters")
                 yield response
             except Exception as e:
@@ -101,21 +102,45 @@ class AgentClient:
         return 0
 
 
-async def collect_response(client: AgentClient, user_message: str, max_chars: int) -> str:
-    logger.debug(f"Collecting response for message: {user_message[:100]}... (max chars: {max_chars})")
-    parts = []
+async def collect_response(
+    client: AgentClient, user_message: str, max_total_chars: int | None = None
+) -> str:
+    limit_text = f" (max chars: {max_total_chars})" if max_total_chars else ""
+    logger.debug(
+        f"Collecting response for message: {user_message[:100]}...{limit_text}"
+    )
+
+    parts: list[str] = []
     chunk_count = 0
-    
+    total_length = 0
+    effective_limit = max_total_chars if max_total_chars and max_total_chars > 0 else None
+
     async for chunk in client.chat(user_message):
         chunk_count += 1
         parts.append(chunk)
-        current_length = sum(len(p) for p in parts)
-        logger.debug(f"Chunk {chunk_count}: +{len(chunk)} chars, total: {current_length}")
-        
-        if current_length >= max_chars:
-            logger.info(f"Reached max chars limit: {current_length}/{max_chars}")
+        total_length += len(chunk)
+        logger.debug(
+            "Chunk %s: +%s chars, total: %s",
+            chunk_count,
+            len(chunk),
+            total_length,
+        )
+
+        if effective_limit is not None and total_length >= effective_limit:
+            logger.info(
+                "Reached max total chars limit: %s/%s",
+                total_length,
+                effective_limit,
+            )
             break
-    
-    response = "".join(parts)[:max_chars]
-    logger.info(f"Response collection complete: {len(response)} characters from {chunk_count} chunks")
+
+    response = "".join(parts)
+    if effective_limit is not None and len(response) > effective_limit:
+        response = response[:effective_limit]
+
+    logger.info(
+        "Response collection complete: %s characters from %s chunks",
+        len(response),
+        chunk_count,
+    )
     return response
