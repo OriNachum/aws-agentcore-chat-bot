@@ -49,6 +49,30 @@ class SplitResponseTests(unittest.TestCase):
             self.assertLessEqual(len(chunk), bot.settings.max_response_chars)
         self.assertTrue(chunks[1].startswith("</ continuing>\n"))
 
+    def test_chunks_terminate_on_newline_when_possible(self):
+        limit = 60
+        bot = CommunityBot(build_settings(max_chars=limit), MagicMock())
+        lines = [
+            "Alpha line one is a bit longer\n",
+            "Beta line two carries on for a while\n",
+            "Gamma line three stays descriptive\n",
+            "Delta line four wraps things up\n",
+        ]
+        text = "".join(lines)
+        chunks = bot._split_response(text)
+
+        def strip_wrappers(chunk: str) -> str:
+            content = chunk
+            if content.startswith("</ continuing>\n"):
+                content = content[len("</ continuing>\n") :]
+            return content
+
+        payloads = [strip_wrappers(chunk) for chunk in chunks]
+        self.assertEqual("".join(payloads), text)
+
+        for payload in payloads[:-1]:
+            self.assertTrue(payload.endswith("\n"))
+
     def test_hard_wrap_when_no_newline(self):
         bot = CommunityBot(build_settings(max_chars=30), MagicMock())
         text = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"

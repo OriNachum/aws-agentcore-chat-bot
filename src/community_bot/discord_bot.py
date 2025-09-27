@@ -210,7 +210,7 @@ class CommunityBot(discord.Client):
         pending_reopen: str | None = None
 
         while start < len(text):
-            prefix = "" if not chunks else "</ continuing>\n"
+            prefix = "" if not chunks else "***</ continuing>***\n\n"
             reopen = ""
             if pending_reopen is not None:
                 reopen = f"```{pending_reopen}\n" if pending_reopen else "```\n"
@@ -230,9 +230,10 @@ class CommunityBot(discord.Client):
 
             max_offset = min(len(text) - start, available)
             sub_text = text[start : start + max_offset]
-            candidate_offsets = [pos for pos, char in enumerate(sub_text, start=1) if char == "\n"]
-            if max_offset > 0:
-                candidate_offsets.append(max_offset)
+            newline_offsets = [pos for pos, char in enumerate(sub_text, start=1) if char == "\n"]
+            preferred_offsets: List[int] = sorted(set(newline_offsets), reverse=True)
+            if max_offset > 0 and max_offset not in preferred_offsets:
+                preferred_offsets.append(max_offset)
 
             chosen_chunk: str | None = None
             chosen_end: int = start
@@ -240,7 +241,7 @@ class CommunityBot(discord.Client):
             chosen_transitions: List[Tuple[str, str, int]] = []
             chosen_state: Tuple[bool, str] = (in_code_block, code_block_lang)
 
-            for offset in reversed(candidate_offsets):
+            for offset in preferred_offsets:
                 if offset <= 0:
                     continue
 
