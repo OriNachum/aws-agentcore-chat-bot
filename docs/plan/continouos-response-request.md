@@ -1,4 +1,4 @@
-Plan how to add support for long chat responses - in which case the bot will split the response in logical points.
+Plan how to add support for continuous long chat responses - in which case the bot will split the response in logical points.
 
 This means, the latest new line, that still fits the response length of Discord.
 
