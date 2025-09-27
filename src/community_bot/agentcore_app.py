@@ -31,6 +31,7 @@ sys.path.insert(0, str(src_path))
 
 from community_bot.config import load_settings
 from community_bot.logging_config import setup_logging, get_logger
+from community_bot.prompt_loader import load_prompt_bundle
 
 # --- Model Configuration ---
 # This is where we can switch between Ollama and Bedrock
@@ -50,6 +51,25 @@ settings = load_settings()
 setup_logging(settings.log_level)
 logger = get_logger("community_bot.agentcore_app")
 
+try:
+    _PROMPT_BUNDLE = load_prompt_bundle(settings)
+    logger.info(
+        "Loaded prompt profile '%s'%s for AgentCore backend",
+        _PROMPT_BUNDLE.profile,
+        " with user primer" if _PROMPT_BUNDLE.user else "",
+    )
+    if _PROMPT_BUNDLE.extras:
+        logger.debug(
+            "Prompt extras discovered for profile '%s': %s",
+            _PROMPT_BUNDLE.profile,
+            ", ".join(sorted(_PROMPT_BUNDLE.extras.keys())),
+        )
+except Exception:  # Propagate after logging for visibility
+    logger.exception("Failed to load prompt bundle for AgentCore backend")
+    raise
+
+_PROMPT_USER_ROLE = (settings.prompt_user_role or "user").strip() or "user"
+
 logger.info(f"Initializing AgentCore app with LLM provider: {LLM_PROVIDER}")
 logger.info(f"AgentCore services available: {AGENTCORE_SERVICES_AVAILABLE}")
 
@@ -60,6 +80,48 @@ agentcore_app = BedrockAgentCoreApp()
 _agent = None
 _memory_client = None
 _gateway_client = None
+
+
+def _compose_agentcore_prompt(
+    user_message: str,
+    *,
+    memory_context: Optional[str] = None,
+    knowledge_context: Optional[str] = None,
+) -> str:
+    """Compose the final prompt for AgentCore mode using the loaded bundle."""
+
+    sections: list[str] = []
+
+    system_prompt = (_PROMPT_BUNDLE.system or "").strip()
+    if system_prompt:
+        sections.append(f"[System Instructions]\n{system_prompt}")
+
+    user_primer = (_PROMPT_BUNDLE.user or "").strip()
+    if user_primer:
+        role_label = _PROMPT_USER_ROLE.title()
+        sections.append(f"[{role_label} Primer]\n{user_primer}")
+
+    if _PROMPT_BUNDLE.extras:
+        for name in sorted(_PROMPT_BUNDLE.extras.keys()):
+            content = (_PROMPT_BUNDLE.extras.get(name) or "").strip()
+            if not content:
+                continue
+            label = name.replace("_", " ").strip() or name
+            sections.append(f"[{label}]\n{content}")
+
+    if memory_context:
+        memory_text = memory_context.strip()
+        if memory_text:
+            sections.append(f"[Conversation Memory]\n{memory_text}")
+
+    if knowledge_context:
+        knowledge_text = knowledge_context.strip()
+        if knowledge_text:
+            sections.append(f"[Relevant Knowledge]\n{knowledge_text}")
+
+    sections.append(f"[{_PROMPT_USER_ROLE.title()} Message]\n{user_message}")
+
+    return "\n\n".join(sections)
 
 def get_memory_client():
     """Get or create the memory client for knowledge persistence."""
@@ -380,8 +442,8 @@ def chat_with_agent(user_message: str, session_id: Optional[str] = None, use_kno
     try:
         agent = get_agent()
         
-        # Enhanced message with memory and knowledge base context
-        enhanced_message = user_message
+        memory_context: Optional[str] = None
+        knowledge_context: Optional[str] = None
         
         # Add memory context if available
         if session_id and AGENTCORE_SERVICES_AVAILABLE:
@@ -391,8 +453,7 @@ def chat_with_agent(user_message: str, session_id: Optional[str] = None, use_kno
                     # Retrieve conversation history for context
                     memory_context = memory_client.get_session_memory(session_id)
                     if memory_context:
-                        enhanced_message = f"Previous context: {memory_context}\n\nCurrent message: {user_message}"
-                        logger.info("Added memory context to message")
+                        logger.info("Including memory context in AgentCore prompt")
                 except Exception as e:
                     logger.warning(f"Failed to retrieve memory context: {e}")
         
@@ -406,11 +467,16 @@ def chat_with_agent(user_message: str, session_id: Optional[str] = None, use_kno
                     # through the gateway client
                     knowledge_context = query_knowledge_base_via_gateway(gateway_client, user_message)
                     if knowledge_context:
-                        enhanced_message = f"{enhanced_message}\n\nRelevant knowledge: {knowledge_context}"
-                        logger.info("Added knowledge base context to message")
+                        logger.info("Including knowledge base context in AgentCore prompt")
                 except Exception as e:
                     logger.warning(f"Failed to retrieve knowledge base context: {e}")
         
+        enhanced_message = _compose_agentcore_prompt(
+            user_message=user_message,
+            memory_context=memory_context,
+            knowledge_context=knowledge_context,
+        )
+
         # Process with the agent
         result = agent(enhanced_message)
         response_text = str(result)  # AgentResult has __str__ method

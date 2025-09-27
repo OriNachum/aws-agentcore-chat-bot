@@ -63,7 +63,18 @@ class AgentClient:
             
             # Set agent to a special marker to indicate we're using agentcore
             self.agent = "agentcore"
-            self.prompt_bundle = None
+            self.prompt_bundle = load_prompt_bundle(settings)
+            logger.info(
+                "Loaded prompt profile '%s'%s for AgentCore backend",
+                self.prompt_bundle.profile,
+                " with user primer" if self.prompt_bundle.user else "",
+            )
+            if self.prompt_bundle.extras:
+                logger.debug(
+                    "Prompt extras discovered for profile '%s': %s",
+                    self.prompt_bundle.profile,
+                    ", ".join(sorted(self.prompt_bundle.extras.keys())),
+                )
             logger.info("AgentCore backend with Strands framework initialized successfully")
         else:
             error_msg = f"Unknown backend mode: {settings.backend_mode}"
