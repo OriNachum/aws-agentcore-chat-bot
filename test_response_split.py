@@ -82,7 +82,11 @@ class SplitResponseTests(unittest.TestCase):
         for chunk in chunks:
             self.assertLessEqual(len(chunk), bot.settings.max_response_chars)
         # Reconstruct text without continuation markers to ensure full coverage
-        reconstructed = chunks[0] + "".join(chunk.split("\n", 1)[1] if chunk.startswith("</ continuing>") else chunk for chunk in chunks[1:])
+        def strip_continuation_prefix(payload: str) -> str:
+            prefix = "***</ continuing>***\n\n"
+            return payload[len(prefix) :] if payload.startswith(prefix) else payload
+
+        reconstructed = "".join(strip_continuation_prefix(chunk) for chunk in chunks)
         self.assertEqual(reconstructed, text)
 
     def test_code_block_split_preserves_fences(self):

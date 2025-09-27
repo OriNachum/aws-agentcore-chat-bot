@@ -43,6 +43,11 @@ from community_bot import agentcore_app  # noqa: E402
 from community_bot.agent_client import AgentClient  # noqa: E402
 from community_bot.config import Settings  # noqa: E402
 
+import importlib
+
+# Reload module so that it picks up the temporary prompt root configured above.
+agentcore_app = importlib.reload(agentcore_app)
+
 
 class AgentCorePromptCompositionTests(unittest.TestCase):
     """Validate prompt composition for AgentCore backend."""
