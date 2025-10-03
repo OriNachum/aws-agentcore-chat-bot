@@ -4,6 +4,8 @@ import json
 import os
 import sys
 import requests
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
 from pathlib import Path
 from typing import Any, Dict, Optional, TypedDict
@@ -251,6 +253,12 @@ def query_knowledge_base_via_gateway(
             logger.debug(f"[KB QUERY] Direct API result type: {type(result)}")
             logger.debug(f"[KB QUERY] Direct API result: {str(result)[:500]}")
             
+            # Check for errors first
+            if result and isinstance(result, dict) and "error" in result:
+                logger.error(f"[KB QUERY] ❌ Direct API returned error: {result.get('error')}")
+                # Return the error dict so it can be relayed to the agent
+                return result
+            
             content = _extract_content_from_result(result)
             if content:
                 logger.info(f"[KB QUERY] ✅ Successfully queried via direct API - {len(content)} characters")
@@ -339,9 +347,10 @@ def _query_via_direct_api(
 ) -> Optional[Any]:
     """
     Query knowledge base using direct API calls.
+    For AWS Bedrock KB, uses boto3 with proper authentication.
     
     Args:
-        kb_endpoint: Knowledge base API endpoint
+        kb_endpoint: Knowledge base API endpoint (can be AWS Bedrock URL)
         query: Search query
     
     Returns:
@@ -350,6 +359,13 @@ def _query_via_direct_api(
     try:
         logger.info(f"[DIRECT API] Querying knowledge base endpoint: {kb_endpoint}")
         
+        # Check if this is an AWS Bedrock Knowledge Base endpoint
+        if "bedrock-agent-runtime" in kb_endpoint and "amazonaws.com" in kb_endpoint:
+            logger.info("[DIRECT API] Detected AWS Bedrock Knowledge Base - using boto3")
+            return _query_bedrock_kb(kb_endpoint, query, max_results=max_results)
+        
+        # Otherwise, use generic HTTP API
+        logger.info("[DIRECT API] Using generic HTTP API approach")
         kb_api_key = os.environ.get("KB_DIRECT_API_KEY")
         logger.debug(f"[DIRECT API] API key: {'SET' if kb_api_key else 'NOT SET'}")
         
@@ -378,6 +394,163 @@ def _query_via_direct_api(
         
         logger.info(f"[DIRECT API] Response status: {response.status_code}")
         logger.debug(f"[DIRECT API] Response headers: {dict(response.headers)}")
+        
+        if response.status_code == 200:
+            logger.info("[DIRECT API] ✅ Received successful response")
+            result = response.json()
+            logger.debug(f"[DIRECT API] Response body (first 1000 chars): {str(result)[:1000]}")
+            
+            if isinstance(result.get("results"), list):
+                original_count = len(result["results"])
+                if max_results is not None:
+                    result = result.copy()
+                    result["results"] = result["results"][:max_results]
+                    logger.debug(f"[DIRECT API] Truncated results from {original_count} to {len(result['results'])}")
+            
+            return result
+        else:
+            logger.error(f"[DIRECT API] ❌ API returned status {response.status_code}")
+            logger.debug(f"[DIRECT API] Response text: {response.text[:500]}")
+            return {
+                "error": f"API returned status {response.status_code}",
+                "status_code": response.status_code,
+                "message": response.text[:500]
+            }
+        
+    except requests.exceptions.Timeout as e:
+        logger.error(f"[DIRECT API] ❌ Request timeout: {e}")
+        return {"error": "Request timeout", "message": str(e)}
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"[DIRECT API] ❌ Connection error: {e}")
+        return {"error": "Connection error", "message": str(e)}
+    except requests.exceptions.RequestException as e:
+        logger.error(f"[DIRECT API] ❌ Request failed: {e}", exc_info=True)
+        return {"error": "Request failed", "message": str(e)}
+    except Exception as e:
+        logger.error(f"[DIRECT API] ❌ Unexpected error: {e}", exc_info=True)
+        return {"error": "Unexpected error", "message": str(e)}
+
+
+def _query_bedrock_kb(
+    kb_endpoint: str,
+    query: str,
+    *,
+    max_results: int = 5,
+) -> Optional[Any]:
+    """
+    Query AWS Bedrock Knowledge Base using boto3.
+    
+    Args:
+        kb_endpoint: AWS Bedrock KB endpoint URL
+        query: Search query
+        max_results: Maximum number of results
+    
+    Returns:
+        Query results or error dict
+    """
+    try:
+        # Extract knowledge base ID from endpoint
+        # Format: https://bedrock-agent-runtime.{region}.amazonaws.com/knowledgebases/{kb_id}/retrieve-and-generate
+        import re
+        kb_match = re.search(r'/knowledgebases/([A-Z0-9]+)', kb_endpoint)
+        region_match = re.search(r'bedrock-agent-runtime\.([a-z0-9-]+)\.amazonaws', kb_endpoint)
+        
+        if not kb_match:
+            logger.error("[BEDROCK KB] Could not extract Knowledge Base ID from endpoint")
+            return {
+                "error": "Invalid Bedrock KB endpoint",
+                "message": "Could not extract Knowledge Base ID from endpoint URL"
+            }
+        
+        kb_id = kb_match.group(1)
+        region = region_match.group(1) if region_match else os.environ.get("AWS_REGION", "us-east-1")
+        
+        logger.info(f"[BEDROCK KB] Using Knowledge Base ID: {kb_id}")
+        logger.info(f"[BEDROCK KB] Using AWS region: {region}")
+        
+        # Create Bedrock Agent Runtime client
+        client = boto3.client(
+            'bedrock-agent-runtime',
+            region_name=region
+        )
+        
+        logger.info(f"[BEDROCK KB] Calling retrieve API with query: {query[:100]}...")
+        
+        # Use the retrieve API for knowledge base
+        response = client.retrieve(
+            knowledgeBaseId=kb_id,
+            retrievalQuery={
+                'text': query
+            },
+            retrievalConfiguration={
+                'vectorSearchConfiguration': {
+                    'numberOfResults': max_results
+                }
+            }
+        )
+        
+        logger.info(f"[BEDROCK KB] ✅ Successfully retrieved results")
+        logger.debug(f"[BEDROCK KB] Response keys: {list(response.keys())}")
+        
+        # Extract results
+        retrieval_results = response.get('retrievalResults', [])
+        logger.info(f"[BEDROCK KB] Found {len(retrieval_results)} results")
+        
+        if not retrieval_results:
+            logger.warning("[BEDROCK KB] No results found")
+            return {
+                "results": [],
+                "message": "No matching documents found in knowledge base"
+            }
+        
+        # Format results for consistency
+        formatted_results = []
+        for idx, result in enumerate(retrieval_results):
+            content = result.get('content', {}).get('text', '')
+            score = result.get('score', 0.0)
+            location = result.get('location', {})
+            
+            formatted_results.append({
+                "content": content,
+                "score": score,
+                "metadata": {
+                    "location": location,
+                    "index": idx
+                }
+            })
+            
+            logger.debug(f"[BEDROCK KB] Result {idx}: score={score:.3f}, length={len(content)} chars")
+        
+        return {
+            "results": formatted_results,
+            "count": len(formatted_results),
+            "source": "bedrock-kb"
+        }
+        
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_message = e.response.get('Error', {}).get('Message', str(e))
+        logger.error(f"[BEDROCK KB] ❌ AWS ClientError: {error_code} - {error_message}")
+        
+        return {
+            "error": f"AWS Error: {error_code}",
+            "message": error_message,
+            "details": str(e)
+        }
+        
+    except BotoCoreError as e:
+        logger.error(f"[BEDROCK KB] ❌ BotoCoreError: {e}", exc_info=True)
+        return {
+            "error": "AWS SDK Error",
+            "message": str(e)
+        }
+        
+    except Exception as e:
+        logger.error(f"[BEDROCK KB] ❌ Unexpected error: {e}", exc_info=True)
+        return {
+            "error": "Unexpected error",
+            "message": str(e)
+        }
         
         if response.status_code == 200:
             logger.info("[DIRECT API] ✅ Received successful response")
@@ -512,11 +685,29 @@ def kb_query_tool(
     if result:
         logger.debug(f"[KB TOOL] Result keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
 
+    # Check if result contains an error
+    if result and isinstance(result, dict) and "error" in result:
+        error_type = result.get("error", "Unknown error")
+        error_message = result.get("message", "No details available")
+        logger.error(f"[KB TOOL] ❌ Knowledge base error: {error_type}")
+        logger.debug(f"[KB TOOL] Error details: {error_message}")
+        
+        # Return detailed error to the agent
+        error_response = f"Knowledge base query failed: {error_type}\n\n{error_message}"
+        if "status_code" in result:
+            error_response += f"\n\nHTTP Status: {result['status_code']}"
+        
+        logger.info("[KB TOOL] Returning error details to agent")
+        return {
+            "status": "error",
+            "content": [{"text": error_response}],
+        }
+
     content_value = (result or {}).get("content") if result else None
 
     if not content_value:
         logger.warning(f"[KB TOOL] ❌ No results found for query: {trimmed_query[:100]}")
-        logger.info("[KB TOOL] Returning error response to agent")
+        logger.info("[KB TOOL] Returning 'no results' response to agent")
         return {
             "status": "error",
             "content": [{"text": "No knowledge base entries matched the query."}],
