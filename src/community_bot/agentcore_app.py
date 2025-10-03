@@ -109,15 +109,21 @@ def _compose_agentcore_prompt(
 ) -> str:
     """Compose the final prompt for AgentCore mode using the loaded bundle."""
 
+    logger.debug(f"[PROMPT COMPOSE] Building prompt with user_message: {len(user_message)} chars")
+    logger.debug(f"[PROMPT COMPOSE] Memory context: {len(memory_context) if memory_context else 0} chars")
+    logger.debug(f"[PROMPT COMPOSE] Knowledge context: {len(knowledge_context) if knowledge_context else 0} chars")
+
     sections: list[str] = []
 
     system_prompt = (_PROMPT_BUNDLE.system or "").strip()
     if system_prompt:
+        logger.debug(f"[PROMPT COMPOSE] Adding system prompt: {len(system_prompt)} chars")
         sections.append(f"[System Instructions]\n{system_prompt}")
 
     user_primer = (_PROMPT_BUNDLE.user or "").strip()
     if user_primer:
         role_label = _PROMPT_USER_ROLE.title()
+        logger.debug(f"[PROMPT COMPOSE] Adding user primer: {len(user_primer)} chars")
         sections.append(f"[{role_label} Primer]\n{user_primer}")
 
     if _PROMPT_BUNDLE.extras:
@@ -126,21 +132,27 @@ def _compose_agentcore_prompt(
             if not content:
                 continue
             label = name.replace("_", " ").strip() or name
+            logger.debug(f"[PROMPT COMPOSE] Adding extra section '{label}': {len(content)} chars")
             sections.append(f"[{label}]\n{content}")
 
     if memory_context:
         memory_text = memory_context.strip()
         if memory_text:
+            logger.debug(f"[PROMPT COMPOSE] Adding memory context: {len(memory_text)} chars")
             sections.append(f"[Conversation Memory]\n{memory_text}")
 
     if knowledge_context:
         knowledge_text = knowledge_context.strip()
         if knowledge_text:
+            logger.debug(f"[PROMPT COMPOSE] Adding knowledge context: {len(knowledge_text)} chars")
             sections.append(f"[Relevant Knowledge]\n{knowledge_text}")
 
     sections.append(f"[{_PROMPT_USER_ROLE.title()} Message]\n{user_message}")
 
-    return "\n\n".join(sections)
+    final_prompt = "\n\n".join(sections)
+    logger.debug(f"[PROMPT COMPOSE] Final prompt composed: {len(final_prompt)} chars, {len(sections)} sections")
+    
+    return final_prompt
 
 def get_memory_client():
     """Get or create the memory client for knowledge persistence."""
@@ -816,6 +828,9 @@ def chat_with_agent(user_message: str, session_id: Optional[str] = None, use_kno
         
         logger.debug(f"[CHAT] Enhanced message length: {len(enhanced_message)} characters")
         logger.debug(f"[CHAT] Enhanced message preview: {enhanced_message[:300]}...")
+        logger.debug("=" * 80)
+        logger.debug(f"[CHAT] FULL QUERY TO MODEL:\n{enhanced_message}")
+        logger.debug("=" * 80)
 
         # Process with the agent
         logger.info("[CHAT] Invoking Strands agent...")
@@ -824,9 +839,27 @@ def chat_with_agent(user_message: str, session_id: Optional[str] = None, use_kno
         logger.info("=" * 80)
         logger.info("[CHAT] Agent invocation completed")
         
+        # Log the result object details
+        logger.debug(f"[CHAT] Result object type: {type(result)}")
+        logger.debug(f"[CHAT] Result object repr: {repr(result)[:500]}")
+        
         response_text = str(result)  # AgentResult has __str__ method
         logger.info(f"[CHAT] Agent response: {len(response_text)} characters")
         logger.debug(f"[CHAT] Response preview: {response_text[:300]}...")
+        logger.debug("=" * 80)
+        logger.debug(f"[CHAT] FULL RESPONSE FROM MODEL:\n{response_text}")
+        logger.debug("=" * 80)
+        
+        # Log additional result properties if available
+        try:
+            if hasattr(result, 'messages'):
+                logger.debug(f"[CHAT] Result has messages attribute: {len(getattr(result, 'messages', []))} messages")  # type: ignore
+            if hasattr(result, 'content'):
+                logger.debug(f"[CHAT] Result content: {getattr(result, 'content', 'N/A')}")  # type: ignore
+            if hasattr(result, 'tool_calls'):
+                logger.debug(f"[CHAT] Result tool calls: {getattr(result, 'tool_calls', 'N/A')}")  # type: ignore
+        except Exception as attr_err:
+            logger.debug(f"[CHAT] Could not access result attributes: {attr_err}")
         
         # Store the interaction in memory if session_id is provided
         if session_id and AGENTCORE_SERVICES_AVAILABLE:
