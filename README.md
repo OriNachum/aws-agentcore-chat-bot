@@ -57,6 +57,10 @@ DISCORD_CHANNEL_ID=123456789012345678
 AWS_REGION=us-east-1
 AGENT_ID=your_agent_id
 AGENT_ALIAS_ID=your_agent_alias_id
+
+# Optional: AWS Bedrock Knowledge Base
+KNOWLEDGE_BASE_ID=your_kb_id
+KB_DIRECT_ENDPOINT=https://bedrock-agent-runtime.us-east-1.amazonaws.com/knowledgebases/YOUR_KB_ID/retrieve-and-generate
 ```
 
 Run:
@@ -64,6 +68,31 @@ Run:
 uv sync
 uv run community-bot
 ```
+
+### AWS Bedrock Knowledge Base Integration
+
+The bot supports querying AWS Bedrock Knowledge Bases for RAG (Retrieval Augmented Generation). When configured, the agent can automatically search your knowledge base to find relevant information.
+
+**Setup**:
+1. Create a Knowledge Base in AWS Bedrock console
+2. Upload documents to S3 and sync with your KB
+3. Add the KB configuration to your `.env` file (see above)
+4. Ensure your IAM user/role has `bedrock:Retrieve` permission
+
+**Testing**:
+```powershell
+# Quick test of KB integration
+uv run python test_kb_bedrock.py
+
+# Full bot test
+uv run community-bot
+```
+
+**Documentation**:
+- 📚 **[Complete KB Setup Guide](docs/BEDROCK_KB_SETUP.md)** - Step-by-step setup
+- 📐 **[Architecture Overview](docs/KB_ARCHITECTURE.md)** - How it works
+- 📋 **[Quick Reference](docs/KB_QUICK_REFERENCE.md)** - Cheat sheet
+- 🐛 **[Troubleshooting](docs/BEDROCK_KB_SETUP.md#troubleshooting)** - Common issues
 
 ## Environment Variables
 
@@ -75,6 +104,8 @@ uv run community-bot
 | AWS_REGION | AgentCore | AWS region (e.g., us-east-1) |
 | AGENT_ID | AgentCore | Bedrock Agent ID |
 | AGENT_ALIAS_ID | AgentCore | Bedrock Agent Alias ID |
+| KNOWLEDGE_BASE_ID | Optional | Bedrock Knowledge Base ID for RAG |
+| KB_DIRECT_ENDPOINT | Optional | Bedrock KB endpoint URL (for RAG queries) |
 | OLLAMA_MODEL | Ollama | Local model name (e.g., llama3.1) |
 | OLLAMA_BASE_URL | Ollama optional | Defaults http://localhost:11434 |
 | LOG_LEVEL | Optional | Default INFO |
@@ -134,8 +165,12 @@ PROMPT_PROFILE=community-support
 |---------|------------|
 | No response | Check agent alias deployment / permissions |
 | AccessDenied | Ensure IAM allows bedrock:InvokeAgent |
+| KB 403 Forbidden | Ensure IAM allows bedrock:Retrieve and AWS credentials configured |
+| KB No results | Check KB has indexed documents; try broader queries |
 | Ollama 404 | Update Ollama; verify /api/chat endpoint |
 | Bot silent | Confirm channel ID numeric & correct |
+
+For Knowledge Base issues, see **[KB Troubleshooting Guide](docs/BEDROCK_KB_SETUP.md#troubleshooting)**
 
 ## License
 
