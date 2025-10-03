@@ -184,13 +184,18 @@ def query_knowledge_base_via_gateway(
         Knowledge base response or None if no results
     """
     try:
-        logger.debug(f"Querying knowledge base with: {query[:100]}...")
+        logger.info(f"[KB QUERY] Starting knowledge base query with: {query[:100]}...")
+        logger.debug(f"[KB QUERY] Query parameters: max_results={max_results}, include_metadata={include_metadata}")
         
         # Try AgentCore Gateway approach first
         kb_gateway_id = os.environ.get("KB_GATEWAY_ID")
         kb_gateway_endpoint = os.environ.get("KB_GATEWAY_ENDPOINT")
         
+        logger.debug(f"[KB QUERY] Gateway configuration: gateway_id={kb_gateway_id}, endpoint={kb_gateway_endpoint}")
+        logger.debug(f"[KB QUERY] Gateway client available: {gateway_client is not None}")
+        
         if kb_gateway_id and kb_gateway_endpoint and gateway_client:
+            logger.info("[KB QUERY] Attempting AgentCore Gateway query...")
             try:
                 # Use AgentCore Gateway MCP tools
                 result = _query_via_agentcore_gateway(
@@ -200,40 +205,61 @@ def query_knowledge_base_via_gateway(
                     max_results=max_results,
                     include_metadata=include_metadata,
                 )
+                logger.debug(f"[KB QUERY] Gateway result type: {type(result)}")
+                logger.debug(f"[KB QUERY] Gateway result: {str(result)[:500]}")
+                
                 content = _extract_content_from_result(result)
                 if content:
-                    logger.debug("Successfully queried via AgentCore Gateway")
+                    logger.info(f"[KB QUERY] ✅ Successfully queried via AgentCore Gateway - {len(content)} characters")
                     return {
                         "content": content,
                         "source": "gateway",
                         "raw": result,
                     }
+                else:
+                    logger.warning("[KB QUERY] Gateway query returned result but no content could be extracted")
             except Exception as gateway_error:
-                logger.warning(f"AgentCore Gateway query failed, trying direct approach: {gateway_error}")
+                logger.error(f"[KB QUERY] ❌ AgentCore Gateway query failed: {gateway_error}", exc_info=True)
+                logger.info("[KB QUERY] Falling back to direct API approach...")
+        else:
+            logger.info("[KB QUERY] Gateway not configured, checking direct API...")
         
         # Fallback to direct API approach
         kb_direct_endpoint = os.environ.get("KB_DIRECT_ENDPOINT")
+        logger.debug(f"[KB QUERY] Direct endpoint: {kb_direct_endpoint}")
+        
         if kb_direct_endpoint:
+            logger.info("[KB QUERY] Attempting direct API query...")
             result = _query_via_direct_api(
                 kb_direct_endpoint,
                 query,
                 max_results=max_results,
                 include_metadata=include_metadata,
             )
+            logger.debug(f"[KB QUERY] Direct API result type: {type(result)}")
+            logger.debug(f"[KB QUERY] Direct API result: {str(result)[:500]}")
+            
             content = _extract_content_from_result(result)
             if content:
-                logger.debug("Successfully queried via direct API")
+                logger.info(f"[KB QUERY] ✅ Successfully queried via direct API - {len(content)} characters")
                 return {
                     "content": content,
                     "source": "direct",
                     "raw": result,
                 }
+            else:
+                logger.warning("[KB QUERY] Direct API query returned result but no content could be extracted")
         
-        logger.debug("No knowledge base configured or available")
+        logger.warning("[KB QUERY] ❌ No knowledge base configured or available")
+        logger.info("[KB QUERY] Configuration check:")
+        logger.info(f"  - KB_GATEWAY_ID: {'SET' if kb_gateway_id else 'NOT SET'}")
+        logger.info(f"  - KB_GATEWAY_ENDPOINT: {'SET' if kb_gateway_endpoint else 'NOT SET'}")
+        logger.info(f"  - KB_DIRECT_ENDPOINT: {'SET' if kb_direct_endpoint else 'NOT SET'}")
+        logger.info(f"  - Gateway client: {'AVAILABLE' if gateway_client else 'NOT AVAILABLE'}")
         return None
         
     except Exception as e:
-        logger.error(f"Error querying knowledge base: {e}")
+        logger.error(f"[KB QUERY] ❌ Error querying knowledge base: {e}", exc_info=True)
         return None
 
 def _query_via_agentcore_gateway(
@@ -256,6 +282,10 @@ def _query_via_agentcore_gateway(
         Query result or None
     """
     try:
+        logger.info(f"[GATEWAY] Invoking AgentCore Gateway tool...")
+        logger.debug(f"[GATEWAY] Gateway ID: {gateway_id}")
+        logger.debug(f"[GATEWAY] Tool name: kb-query-tool")
+        
         # Use MCP tools via AgentCore Gateway
         parameters: Dict[str, Any] = {
             "query": query,
@@ -263,17 +293,29 @@ def _query_via_agentcore_gateway(
         }
         if max_results is not None:
             parameters["max_results"] = max_results
+        
+        logger.debug(f"[GATEWAY] Tool parameters: {parameters}")
 
+        logger.info("[GATEWAY] Calling gateway_client.invoke_tool()...")
         tool_result = gateway_client.invoke_tool(
             gateway_id=gateway_id,
             tool_name="kb-query-tool",
             parameters=parameters,
         )
         
-        return tool_result if tool_result else None
+        logger.info(f"[GATEWAY] Tool invocation completed")
+        logger.debug(f"[GATEWAY] Result type: {type(tool_result)}")
+        logger.debug(f"[GATEWAY] Result value: {str(tool_result)[:1000]}")
+        
+        if tool_result:
+            logger.info("[GATEWAY] ✅ Tool returned result")
+            return tool_result
+        else:
+            logger.warning("[GATEWAY] ⚠️ Tool returned empty/None result")
+            return None
         
     except Exception as e:
-        logger.warning(f"AgentCore Gateway query failed: {e}")
+        logger.error(f"[GATEWAY] ❌ Gateway query failed: {e}", exc_info=True)
         return None
 
 def _query_via_direct_api(
@@ -293,8 +335,12 @@ def _query_via_direct_api(
     Returns:
         Query result or None
     """
-    try:        
+    try:
+        logger.info(f"[DIRECT API] Querying knowledge base endpoint: {kb_endpoint}")
+        
         kb_api_key = os.environ.get("KB_DIRECT_API_KEY")
+        logger.debug(f"[DIRECT API] API key: {'SET' if kb_api_key else 'NOT SET'}")
+        
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {kb_api_key}" if kb_api_key else ""
@@ -307,6 +353,10 @@ def _query_via_direct_api(
             "include_metadata": include_metadata,
         }
         
+        logger.debug(f"[DIRECT API] Request payload: {payload}")
+        logger.debug(f"[DIRECT API] Request URL: {kb_endpoint}/query")
+        
+        logger.info("[DIRECT API] Sending POST request...")
         response = requests.post(
             f"{kb_endpoint}/query",
             json=payload,
@@ -314,47 +364,91 @@ def _query_via_direct_api(
             timeout=30
         )
         
+        logger.info(f"[DIRECT API] Response status: {response.status_code}")
+        logger.debug(f"[DIRECT API] Response headers: {dict(response.headers)}")
+        
         if response.status_code == 200:
+            logger.info("[DIRECT API] ✅ Received successful response")
             result = response.json()
-            if isinstance(result.get("results"), list) and max_results is not None:
-                result = result.copy()
-                result["results"] = result["results"][:max_results]
+            logger.debug(f"[DIRECT API] Response body (first 1000 chars): {str(result)[:1000]}")
+            
+            if isinstance(result.get("results"), list):
+                original_count = len(result["results"])
+                if max_results is not None:
+                    result = result.copy()
+                    result["results"] = result["results"][:max_results]
+                    logger.debug(f"[DIRECT API] Truncated results from {original_count} to {len(result['results'])}")
+            
             return result
         else:
-            logger.warning(f"Knowledge base API returned status {response.status_code}: {response.text}")
+            logger.error(f"[DIRECT API] ❌ API returned status {response.status_code}")
+            logger.debug(f"[DIRECT API] Response text: {response.text[:500]}")
             return None
         
+    except requests.exceptions.Timeout as e:
+        logger.error(f"[DIRECT API] ❌ Request timeout: {e}")
+        return None
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"[DIRECT API] ❌ Connection error: {e}")
+        return None
+    except requests.exceptions.RequestException as e:
+        logger.error(f"[DIRECT API] ❌ Request failed: {e}", exc_info=True)
+        return None
     except Exception as e:
-        logger.warning(f"Direct API query failed: {e}")
+        logger.error(f"[DIRECT API] ❌ Unexpected error: {e}", exc_info=True)
         return None
 
 
 def _extract_content_from_result(result: Any) -> Optional[str]:
     """Best-effort extraction of human-readable content from varied KB responses."""
+    
+    logger.debug(f"[EXTRACT] Extracting content from result type: {type(result)}")
 
     if not result:
+        logger.debug("[EXTRACT] Result is None or empty")
         return None
 
     if isinstance(result, str):
-        return result.strip() or None
+        extracted = result.strip() or None
+        logger.debug(f"[EXTRACT] Result is string - {len(extracted) if extracted else 0} characters")
+        return extracted
 
     if isinstance(result, dict):
+        logger.debug(f"[EXTRACT] Result is dict with keys: {list(result.keys())}")
+        
+        # Try common content keys
         for key in ("content", "text", "answer"):
             value = result.get(key)
             if isinstance(value, str) and value.strip():
+                logger.info(f"[EXTRACT] ✅ Extracted content from '{key}' field - {len(value.strip())} characters")
                 return value.strip()
 
+        # Try extracting from results array
         if isinstance(result.get("results"), list):
+            results_list = result["results"]
+            logger.debug(f"[EXTRACT] Found 'results' array with {len(results_list)} items")
+            
             snippets: list[str] = []
-            for item in result["results"]:
+            for idx, item in enumerate(results_list):
                 if not isinstance(item, dict):
+                    logger.debug(f"[EXTRACT] Result item {idx} is not a dict, skipping")
                     continue
+                    
                 snippet = item.get("content") or item.get("text")
                 if isinstance(snippet, str) and snippet.strip():
                     snippets.append(snippet.strip())
+                    logger.debug(f"[EXTRACT] Extracted snippet {idx}: {len(snippet.strip())} characters")
+                else:
+                    logger.debug(f"[EXTRACT] Result item {idx} has no extractable content")
+            
             if snippets:
-                return "\n\n".join(snippets)
+                combined = "\n\n".join(snippets)
+                logger.info(f"[EXTRACT] ✅ Combined {len(snippets)} snippets - {len(combined)} total characters")
+                return combined
+            else:
+                logger.warning("[EXTRACT] ⚠️ Results array exists but no snippets could be extracted")
 
+    logger.warning(f"[EXTRACT] ❌ Could not extract content from result: {str(result)[:200]}")
     return None
 
 
@@ -371,22 +465,30 @@ def kb_query_tool(
 ) -> Dict[str, Any]:
     """Return knowledge base snippets that match the provided query."""
 
+    logger.info("=" * 80)
+    logger.info("[KB TOOL] kb-query-tool invoked by Strands agent")
+    logger.info("=" * 80)
+
     trimmed_query = query.strip()
     if not trimmed_query:
-        logger.info("kb-query-tool received an empty query")
+        logger.warning("[KB TOOL] ⚠️ Received empty query")
         return {
             "status": "error",
             "content": [{"text": "Knowledge base query cannot be empty."}],
         }
 
-    logger.info(
-        "kb-query-tool invoked | query='%s' | max_results=%s | include_metadata=%s",
-        trimmed_query[:100],
-        max_results,
-        include_metadata,
-    )
+    logger.info(f"[KB TOOL] Query: '{trimmed_query[:100]}{'...' if len(trimmed_query) > 100 else ''}'")
+    logger.info(f"[KB TOOL] Parameters: max_results={max_results}, include_metadata={include_metadata}")
+    
+    if tool_context:
+        logger.debug(f"[KB TOOL] Tool use ID: {tool_context.tool_use.get('toolUseId')}")
+        logger.debug(f"[KB TOOL] Tool context: {tool_context}")
 
     gateway_client = get_gateway_client() if AGENTCORE_SERVICES_AVAILABLE else None
+    logger.info(f"[KB TOOL] Gateway client: {'AVAILABLE' if gateway_client else 'NOT AVAILABLE'}")
+    logger.info(f"[KB TOOL] AgentCore services: {'AVAILABLE' if AGENTCORE_SERVICES_AVAILABLE else 'NOT AVAILABLE'}")
+    
+    logger.info("[KB TOOL] Calling query_knowledge_base_via_gateway()...")
     result = query_knowledge_base_via_gateway(
         gateway_client,
         trimmed_query,
@@ -394,41 +496,51 @@ def kb_query_tool(
         include_metadata=include_metadata,
     )
 
+    logger.info(f"[KB TOOL] Query result: {result is not None}")
+    if result:
+        logger.debug(f"[KB TOOL] Result keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+
     content_value = (result or {}).get("content") if result else None
 
     if not content_value:
-        logger.info("kb-query-tool found no results for query: %s", trimmed_query[:100])
+        logger.warning(f"[KB TOOL] ❌ No results found for query: {trimmed_query[:100]}")
+        logger.info("[KB TOOL] Returning error response to agent")
         return {
             "status": "error",
             "content": [{"text": "No knowledge base entries matched the query."}],
         }
 
+    logger.info(f"[KB TOOL] ✅ Found content: {len(content_value)} characters")
     response_text = content_value.strip()
 
     source_value = result.get("source") if result else None
     if source_value:
+        logger.debug(f"[KB TOOL] Content source: {source_value}")
         response_text = f"Source: {source_value}\n\n" + response_text
 
     raw_value = result.get("raw") if result else None
     if include_metadata and raw_value is not None:
         try:
             raw_json = json.dumps(raw_value, indent=2)
+            metadata_snippet = _truncate_for_discord(raw_json, 1500)
             response_text = "\n\n".join(
-                [response_text, f"```json\n{_truncate_for_discord(raw_json, 1500)}\n```"]
+                [response_text, f"```json\n{metadata_snippet}\n```"]
             )
+            logger.debug(f"[KB TOOL] Included metadata: {len(metadata_snippet)} characters")
         except (TypeError, ValueError):
-            logger.debug("kb-query-tool could not serialize raw metadata for logging")
+            logger.debug("[KB TOOL] Could not serialize raw metadata")
 
     response_text = _truncate_for_discord(response_text)
+    logger.info(f"[KB TOOL] Final response: {len(response_text)} characters")
 
     if tool_context:
-        logger.debug(
-            "kb-query-tool completed | tool_use_id=%s | response_chars=%s",
-            tool_context.tool_use.get("toolUseId"),
-            len(response_text),
+        logger.info(
+            f"[KB TOOL] Returning success to agent (tool_use_id={tool_context.tool_use.get('toolUseId')})"
         )
     else:
-        logger.debug("kb-query-tool completed | response_chars=%s", len(response_text))
+        logger.info("[KB TOOL] Returning success to agent")
+
+    logger.info("=" * 80)
 
     return {
         "status": "success",
@@ -551,34 +663,66 @@ def get_agent():
     """Get or create the agent instance."""
     global _agent
     if _agent is None:
+        logger.info("=" * 80)
+        logger.info("[AGENT INIT] Initializing Strands Agent...")
+        logger.info("=" * 80)
+        
         # Use forced provider if set, otherwise use environment variable
         provider = _force_provider or LLM_PROVIDER
+        
+        logger.info(f"[AGENT INIT] LLM Provider: {provider}")
+        logger.info(f"[AGENT INIT] Forced provider: {_force_provider}")
+        logger.info(f"[AGENT INIT] Environment LLM_PROVIDER: {LLM_PROVIDER}")
         
         if provider == "ollama":
             # Assumes Ollama is running locally
             model_name = settings.ollama_model or "llama3"  # Default fallback
             base_url = settings.ollama_base_url or "http://localhost:11434"  # Default fallback
-            logger.info(f"Configuring Ollama model: {model_name} at {base_url}")
-            model = OllamaModel(
-                host=base_url,
-                model_id=model_name
-            )
+            logger.info(f"[AGENT INIT] Configuring Ollama model: {model_name}")
+            logger.info(f"[AGENT INIT] Ollama base URL: {base_url}")
+            
+            try:
+                model = OllamaModel(
+                    host=base_url,
+                    model_id=model_name
+                )
+                logger.info("[AGENT INIT] ✅ Ollama model configured successfully")
+            except Exception as e:
+                logger.error(f"[AGENT INIT] ❌ Failed to configure Ollama model: {e}", exc_info=True)
+                raise
+                
         elif provider == "bedrock":
             # Configure for Bedrock (e.g., Claude)
-            logger.info("Configuring Bedrock model")
-            model = BedrockModel(
-                model_id="anthropic.claude-3-sonnet-20240229-v1:0",
-                temperature=0.3,
-                streaming=True
-            )
+            model_id = "anthropic.claude-3-sonnet-20240229-v1:0"
+            logger.info(f"[AGENT INIT] Configuring Bedrock model: {model_id}")
+            
+            try:
+                model = BedrockModel(
+                    model_id=model_id,
+                    temperature=0.3,
+                    streaming=True
+                )
+                logger.info("[AGENT INIT] ✅ Bedrock model configured successfully")
+            except Exception as e:
+                logger.error(f"[AGENT INIT] ❌ Failed to configure Bedrock model: {e}", exc_info=True)
+                raise
         else:
-            logger.error(f"Unknown LLM provider: {provider}")
+            logger.error(f"[AGENT INIT] ❌ Unknown LLM provider: {provider}")
             raise ValueError(f"Unknown LLM provider: {provider}")
 
         tools = [kb_query_tool]
+        logger.info(f"[AGENT INIT] Registering {len(tools)} tools: {[t.__name__ for t in tools]}")
 
-        _agent = Agent(model=model, tools=tools)
-        logger.info("Initialized Strands Agent with configured model")
+        try:
+            _agent = Agent(model=model, tools=tools)
+            logger.info("[AGENT INIT] ✅ Strands Agent initialized successfully")
+        except Exception as e:
+            logger.error(f"[AGENT INIT] ❌ Failed to initialize Agent: {e}", exc_info=True)
+            raise
+        
+        logger.info("=" * 80)
+    else:
+        logger.debug("[AGENT INIT] Using existing agent instance")
     
     return _agent
 
@@ -594,33 +738,51 @@ def chat_with_agent(user_message: str, session_id: Optional[str] = None, use_kno
     Returns:
         The agent's response
     """
-    logger.info(f"Processing user message: {user_message[:100]}...")
+    logger.info("=" * 80)
+    logger.info(f"[CHAT] Processing user message: {user_message[:100]}{'...' if len(user_message) > 100 else ''}")
+    logger.info(f"[CHAT] Session ID: {session_id}")
+    logger.info(f"[CHAT] Use knowledge base: {use_knowledge_base}")
+    logger.info("=" * 80)
     
     try:
+        logger.info("[CHAT] Getting agent instance...")
         agent = get_agent()
+        logger.debug(f"[CHAT] Agent type: {type(agent)}")
         
         memory_context: Optional[str] = None
         knowledge_context: Optional[str] = None
         
         # Add memory context if available
         if session_id and AGENTCORE_SERVICES_AVAILABLE:
+            logger.info(f"[CHAT] Retrieving memory for session: {session_id}")
             memory_client = get_memory_client()
             if memory_client:
                 try:
                     # Retrieve conversation history for context
                     memory_context = memory_client.get_session_memory(session_id)
                     if memory_context:
-                        logger.info("Including memory context in AgentCore prompt")
+                        logger.info(f"[CHAT] ✅ Memory context retrieved: {len(memory_context)} characters")
+                    else:
+                        logger.debug("[CHAT] No memory context found for session")
                 except Exception as e:
-                    logger.warning(f"Failed to retrieve memory context: {e}")
+                    logger.error(f"[CHAT] ❌ Failed to retrieve memory context: {e}", exc_info=True)
+            else:
+                logger.debug("[CHAT] Memory client not available")
+        else:
+            logger.debug("[CHAT] Skipping memory retrieval (no session_id or services unavailable)")
         
         # Add knowledge base context if available and requested
         if use_knowledge_base:
+            logger.info("[CHAT] Knowledge base augmentation enabled")
             gateway_client = get_gateway_client() if AGENTCORE_SERVICES_AVAILABLE else None
             direct_available = os.environ.get("KB_DIRECT_ENDPOINT") is not None
 
+            logger.debug(f"[CHAT] Gateway client: {'AVAILABLE' if gateway_client else 'NOT AVAILABLE'}")
+            logger.debug(f"[CHAT] Direct KB endpoint: {'CONFIGURED' if direct_available else 'NOT CONFIGURED'}")
+
             if gateway_client or direct_available:
                 try:
+                    logger.info("[CHAT] Querying knowledge base for context...")
                     knowledge_result = query_knowledge_base_via_gateway(
                         gateway_client,
                         user_message,
@@ -629,30 +791,46 @@ def chat_with_agent(user_message: str, session_id: Optional[str] = None, use_kno
                     if knowledge_result and knowledge_result.get("content"):
                         knowledge_context = knowledge_result["content"]
                         logger.info(
-                            "Including knowledge base context in AgentCore prompt (source=%s)",
-                            knowledge_result.get("source", "unknown"),
+                            f"[CHAT] ✅ Knowledge base context retrieved (source={knowledge_result.get('source', 'unknown')}): {len(knowledge_context)} characters"
                         )
                         raw_snapshot = knowledge_result.get("raw")
                         if raw_snapshot is not None:
                             logger.debug(
-                                "Knowledge base raw snapshot: %s",
-                                str(raw_snapshot)[:500],
+                                f"[CHAT] Knowledge base raw snapshot: {str(raw_snapshot)[:500]}"
                             )
+                    else:
+                        logger.warning("[CHAT] ⚠️ Knowledge base query returned no content")
                 except Exception as e:
-                    logger.warning(f"Failed to retrieve knowledge base context: {e}")
+                    logger.error(f"[CHAT] ❌ Failed to retrieve knowledge base context: {e}", exc_info=True)
+            else:
+                logger.warning("[CHAT] ⚠️ No knowledge base access available (neither gateway nor direct)")
+        else:
+            logger.info("[CHAT] Knowledge base augmentation disabled")
         
+        logger.info("[CHAT] Composing enhanced prompt...")
         enhanced_message = _compose_agentcore_prompt(
             user_message=user_message,
             memory_context=memory_context,
             knowledge_context=knowledge_context,
         )
+        
+        logger.debug(f"[CHAT] Enhanced message length: {len(enhanced_message)} characters")
+        logger.debug(f"[CHAT] Enhanced message preview: {enhanced_message[:300]}...")
 
         # Process with the agent
+        logger.info("[CHAT] Invoking Strands agent...")
+        logger.info("=" * 80)
         result = agent(enhanced_message)
+        logger.info("=" * 80)
+        logger.info("[CHAT] Agent invocation completed")
+        
         response_text = str(result)  # AgentResult has __str__ method
+        logger.info(f"[CHAT] Agent response: {len(response_text)} characters")
+        logger.debug(f"[CHAT] Response preview: {response_text[:300]}...")
         
         # Store the interaction in memory if session_id is provided
         if session_id and AGENTCORE_SERVICES_AVAILABLE:
+            logger.info(f"[CHAT] Storing interaction in memory for session: {session_id}")
             memory_client = get_memory_client()
             if memory_client:
                 try:
@@ -661,15 +839,20 @@ def chat_with_agent(user_message: str, session_id: Optional[str] = None, use_kno
                         user_message=user_message,
                         agent_response=response_text
                     )
-                    logger.info("Stored interaction in memory")
+                    logger.info("[CHAT] ✅ Interaction stored in memory")
                 except Exception as e:
-                    logger.warning(f"Failed to store interaction in memory: {e}")
+                    logger.error(f"[CHAT] ❌ Failed to store interaction in memory: {e}", exc_info=True)
+            else:
+                logger.debug("[CHAT] Memory client not available for storage")
         
-        logger.info(f"Agent response generated: {len(response_text)} characters")
+        logger.info(f"[CHAT] ✅ Chat completed successfully: {len(response_text)} characters")
+        logger.info("=" * 80)
         return response_text
         
     except Exception as e:
-        logger.error(f"Error processing request: {e}", exc_info=True)
+        logger.error("=" * 80)
+        logger.error(f"[CHAT] ❌ Error processing request: {e}", exc_info=True)
+        logger.error("=" * 80)
         return f"I encountered an error while processing your request: {str(e)}"
 
 def main():

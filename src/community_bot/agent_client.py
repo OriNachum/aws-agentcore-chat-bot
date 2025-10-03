@@ -83,33 +83,48 @@ class AgentClient:
 
     async def chat(self, user_message: str) -> AsyncGenerator[str, None]:
         """Chat with the agent using the configured backend."""
-        logger.debug(f"Processing chat request: {user_message[:100]}...")
+        logger.info("=" * 80)
+        logger.debug(f"[AGENT CLIENT] Processing chat request: {user_message[:100]}...")
+        logger.debug(f"[AGENT CLIENT] Backend mode: {self.settings.backend_mode}")
         
         if self.settings.backend_mode == "ollama" and isinstance(self.agent, LocalAgent):
-            logger.debug("Using LocalAgent framework for Ollama backend")
+            logger.debug("[AGENT CLIENT] Using LocalAgent framework for Ollama backend")
             # Use new LocalAgent framework
             chunk_count = 0
             async for chunk in self.agent.chat(user_message):
                 chunk_count += 1
-                logger.debug(f"Received chunk {chunk_count}: {len(chunk)} characters")
+                logger.debug(f"[AGENT CLIENT] Received chunk {chunk_count}: {len(chunk)} characters")
                 yield chunk
-            logger.info(f"Ollama chat completed: {chunk_count} chunks received")
+            logger.info(f"[AGENT CLIENT] Ollama chat completed: {chunk_count} chunks received")
             
         elif self.settings.backend_mode == "agentcore":
-            logger.debug("Using new AgentCore Strands framework")
+            logger.info("[AGENT CLIENT] Using AgentCore Strands framework")
+            logger.info("=" * 80)
             # Use new AgentCore Strands framework
             try:
+                logger.debug("[AGENT CLIENT] Calling chat_with_agent in thread...")
                 response = await asyncio.to_thread(chat_with_agent, user_message)
-                logger.info(f"AgentCore response received: {len(response)} characters")
-                logger.info(f"AgentCore full response: {response[:500]}...")
-                yield response
+                logger.info("=" * 80)
+                logger.info(f"[AGENT CLIENT] ✅ AgentCore response received: {len(response)} characters")
+                logger.debug(f"[AGENT CLIENT] Response preview: {response[:500]}...")
+                
+                if not response or not response.strip():
+                    logger.error("[AGENT CLIENT] ❌ EMPTY RESPONSE from AgentCore!")
+                    logger.error("[AGENT CLIENT] This is likely the issue - agent returned nothing")
+                    yield "[Error: Agent returned empty response]"
+                else:
+                    yield response
             except Exception as e:
-                logger.error(f"AgentCore chat failed: {e}", exc_info=True)
+                logger.error("=" * 80)
+                logger.error(f"[AGENT CLIENT] ❌ AgentCore chat failed: {e}", exc_info=True)
+                logger.error("=" * 80)
                 raise
         else:
             error_msg = "Invalid backend configuration"
-            logger.error(f"{error_msg}: mode={self.settings.backend_mode}, agent={self.agent}")
+            logger.error(f"[AGENT CLIENT] {error_msg}: mode={self.settings.backend_mode}, agent={self.agent}")
             raise RuntimeError(error_msg)
+        
+        logger.info("=" * 80)
 
     def clear_memory(self) -> None:
         """Clear conversation memory if using LocalAgent."""
