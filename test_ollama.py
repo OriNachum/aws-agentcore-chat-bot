@@ -18,7 +18,7 @@ load_dotenv()
 
 # Configuration
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://thor.tail0be7e0.ts.net:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gpt-oss:120b")
 
 print(f"Testing Ollama server at: {OLLAMA_BASE_URL}")
 print(f"Using model: {OLLAMA_MODEL}")

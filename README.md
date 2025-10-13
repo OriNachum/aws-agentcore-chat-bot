@@ -10,6 +10,7 @@ The bot watches a single configured Discord channel and replies to each user mes
 ## Features
 
 - Dual backend: `AgentCore` (production) or `Ollama` (local dev)
+- **Source Agents**: Automatically collect and update knowledge base from multiple sources
 - Simple environment-based configuration
 - Safe channel filtering (hard-coded channel ID)
 - Automatic long message splitting to respect Discord 2000 char limit
@@ -115,6 +116,12 @@ uv run community-bot
 | PROMPT_ROOT | Optional | Directory containing prompt profiles (default `<repo>/agents`) |
 | PROMPT_USER_ROLE | Optional | Role used for primer message (default `user`) |
 | MESSAGE_PREFIX | Optional | Prepended to every reply |
+| SOURCE_AGENTS_ENABLED | Optional | Enable automatic KB updates (default `false`) |
+| SOURCE_AGENTS_S3_BUCKET | Source Agents | S3 bucket for KB documents |
+| SOURCE_AGENTS_S3_REGION | Source Agents | AWS region for S3 (default `us-east-1`) |
+| SOURCE_AGENTS_DATA_SOURCE_ID | Optional | Bedrock KB data source ID for sync |
+| SOURCE_AGENTS_RUN_ON_STARTUP | Optional | Run agents on bot startup (default `false`) |
+| SOURCE_AGENTS_INTERVAL | Optional | Collection interval in seconds (default `3600`) |
 
 ## Prompt Profiles
 
@@ -158,6 +165,50 @@ PROMPT_PROFILE=community-support
 2. Create Knowledge Base in Bedrock referencing bucket.
 3. Attach KB to AgentCore agent (tool permission) and deploy alias.
 4. Upload docs, sync KB, then ask questions referencing content.
+
+## Source Agents (Automatic KB Updates)
+
+Source Agents are background processes that continuously collect data from various sources and upload it to S3 to keep your knowledge base up-to-date.
+
+**Quick Start:**
+
+1. Enable in `.env`:
+   ```env
+   SOURCE_AGENTS_ENABLED=true
+   SOURCE_AGENTS_S3_BUCKET=my-kb-bucket
+   SOURCE_AGENTS_DATA_SOURCE_ID=your-data-source-id
+   ```
+
+2. Configure agents in `agents/sources/config.yaml`:
+   ```yaml
+   agents:
+     - id: "my_collector"
+       type: "script"
+       enabled: true
+       schedule: "0 */1 * * *"  # Hourly
+       config:
+         script_path: "./agents/sources/scripts/my_collector.py"
+         category: "my_data"
+   ```
+
+3. Run integrated with bot or standalone:
+   ```bash
+   # With Discord bot
+   uv run community-bot
+   
+   # Standalone
+   python scripts/run_source_agents.py --once
+   ```
+
+**Documentation:**
+- 📚 **[Source Agents Quick Start](docs/SOURCE_AGENTS_QUICKSTART.md)** - Getting started
+- 📐 **[Design Document](docs/plan/sub-agents.md)** - Architecture and detailed design
+- 📁 **[Agent Directory](agents/sources/README.md)** - Configuration examples
+
+**Supported Agent Types:**
+- **Script**: Run custom Python scripts to collect data
+- **Database**: Query PostgreSQL databases
+- More types planned (Browser, MCP, API, etc.)
 
 ## Troubleshooting
 

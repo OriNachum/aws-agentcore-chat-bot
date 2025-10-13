@@ -25,9 +25,14 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["ruff", "mypy", "types-requests"]
+source-agents = [
+	"pyyaml>=6.0",
+	"asyncpg>=0.29.0",  # For database agents
+]
 
 [project.scripts]
 community-bot = "community_bot.main:run"
+source-agents = "scripts.run_source_agents:main"
 
 [tool.ruff]
 line-length = 100

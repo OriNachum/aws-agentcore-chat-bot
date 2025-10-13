@@ -32,6 +32,13 @@ class Settings:
     prompt_profile: str = "default"
     prompt_root: Path = Path.cwd() / "agents"
     prompt_user_role: str = "user"
+    # Source Agents settings
+    source_agents_enabled: bool = False
+    source_agents_s3_bucket: Optional[str] = None
+    source_agents_s3_region: str = "us-east-1"
+    source_agents_data_source_id: Optional[str] = None
+    source_agents_run_on_startup: bool = False
+    source_agents_interval: int = 3600  # seconds
 
 
 REQUIRED_BASE = ["DISCORD_BOT_TOKEN", "DISCORD_CHANNEL_ID", "BACKEND_MODE"]
@@ -90,4 +97,11 @@ def load_settings() -> Settings:
         prompt_profile=prompt_profile,
         prompt_root=prompt_root,
         prompt_user_role=prompt_user_role,
+        # Source Agents
+        source_agents_enabled=os.getenv("SOURCE_AGENTS_ENABLED", "false").lower() == "true",
+        source_agents_s3_bucket=os.getenv("SOURCE_AGENTS_S3_BUCKET"),
+        source_agents_s3_region=os.getenv("SOURCE_AGENTS_S3_REGION", "us-east-1"),
+        source_agents_data_source_id=os.getenv("SOURCE_AGENTS_DATA_SOURCE_ID"),
+        source_agents_run_on_startup=os.getenv("SOURCE_AGENTS_RUN_ON_STARTUP", "false").lower() == "true",
+        source_agents_interval=int(os.getenv("SOURCE_AGENTS_INTERVAL", "3600")),
     )

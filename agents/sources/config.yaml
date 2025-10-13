@@ -1,0 +1,23 @@
+"""Example agent configuration file."""
+
+agents:
+  # Example database agent
+  # - id: "company_database"
+  #   type: "database"
+  #   enabled: false
+  #   schedule: "0 */6 * * *"  # Every 6 hours
+  #   config:
+  #     connection_string: "${DATABASE_URL}"
+  #     query: "SELECT * FROM knowledge_articles WHERE updated_at > NOW() - INTERVAL '6 hours'"
+  #     category: "database/articles"
+  #     id_column: "id"
+  #     title_column: "title"
+  
+  # Example script agent
+  - id: "example_collector"
+    type: "script"
+    enabled: true
+    schedule: "0 */1 * * *"  # Every hour
+    config:
+      script_path: "./agents/sources/scripts/example_collector.py"
+      category: "examples"
