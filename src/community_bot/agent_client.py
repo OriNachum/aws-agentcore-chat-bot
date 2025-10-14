@@ -9,6 +9,9 @@ from .logging_config import get_logger
 from .agentcore_app import chat_with_agent
 from .prompt_loader import load_prompt_bundle
 
+# Import Nova components
+from .nova_agent import NovaAgent
+
 logger = get_logger("community_bot.agent")
 
 
@@ -76,6 +79,29 @@ class AgentClient:
                     ", ".join(sorted(self.prompt_bundle.extras.keys())),
                 )
             logger.info("AgentCore backend with Strands framework initialized successfully")
+            
+        elif settings.backend_mode == "nova":
+            logger.info("Setting up Nova backend")
+            logger.debug(f"Nova model: {settings.nova_model_id}")
+            logger.debug(f"AWS region: {settings.aws_region}")
+            logger.debug(f"Memory max messages: {settings.memory_max_messages}")
+            
+            self.prompt_bundle = load_prompt_bundle(settings)
+            logger.info(
+                "Loaded prompt profile '%s'%s for Nova backend",
+                self.prompt_bundle.profile,
+                " with user primer" if self.prompt_bundle.user else "",
+            )
+            if self.prompt_bundle.extras:
+                logger.debug(
+                    "Prompt extras discovered for profile '%s': %s",
+                    self.prompt_bundle.profile,
+                    ", ".join(sorted(self.prompt_bundle.extras.keys())),
+                )
+            
+            self.agent = NovaAgent(settings, self.prompt_bundle)
+            logger.info("Nova backend initialized successfully")
+            
         else:
             error_msg = f"Unknown backend mode: {settings.backend_mode}"
             logger.error(error_msg)
@@ -119,6 +145,17 @@ class AgentClient:
                 logger.error(f"[AGENT CLIENT] ❌ AgentCore chat failed: {e}", exc_info=True)
                 logger.error("=" * 80)
                 raise
+                
+        elif self.settings.backend_mode == "nova" and isinstance(self.agent, NovaAgent):
+            logger.debug("[AGENT CLIENT] Using Nova backend")
+            # Use Nova agent
+            chunk_count = 0
+            async for chunk in self.agent.chat(user_message):
+                chunk_count += 1
+                logger.debug(f"[AGENT CLIENT] Received chunk {chunk_count}: {len(chunk)} characters")
+                yield chunk
+            logger.info(f"[AGENT CLIENT] Nova chat completed: {chunk_count} chunks received")
+            
         else:
             error_msg = "Invalid backend configuration"
             logger.error(f"[AGENT CLIENT] {error_msg}: mode={self.settings.backend_mode}, agent={self.agent}")
@@ -133,6 +170,9 @@ class AgentClient:
             self.agent.clear_memory()
             self.prompt_bundle = self.agent.prompt_bundle
             logger.info("Conversation memory cleared successfully")
+        elif self.settings.backend_mode == "nova" and isinstance(self.agent, NovaAgent):
+            self.agent.clear_memory()
+            logger.info("Conversation memory cleared successfully (Nova)")
         else:
             logger.debug("No memory to clear (AgentCore mode or no agent)")
     
@@ -141,6 +181,10 @@ class AgentClient:
         if self.settings.backend_mode == "ollama" and isinstance(self.agent, LocalAgent):
             size = self.agent.get_memory_size()
             logger.debug(f"Current memory size: {size} messages")
+            return size
+        elif self.settings.backend_mode == "nova" and isinstance(self.agent, NovaAgent):
+            size = self.agent.get_memory_size()
+            logger.debug(f"Current memory size: {size} messages (Nova)")
             return size
         logger.debug("Memory size not available (AgentCore mode or no agent)")
         return 0

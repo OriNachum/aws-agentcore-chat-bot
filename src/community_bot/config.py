@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 class Settings:
     discord_token: str
     discord_channel_id: int
-    backend_mode: str  # 'agentcore' or 'ollama'
+    backend_mode: str  # 'agentcore', 'ollama', or 'nova'
     # AWS/AgentCore settings (for backward compatibility)
     aws_region: Optional[str] = None
     agent_id: Optional[str] = None  # AgentCore Agent / Knowledge Base identifier
@@ -21,6 +21,11 @@ class Settings:
     # Ollama settings (enhanced for LocalAgent framework)
     ollama_model: Optional[str] = None
     ollama_base_url: str = "http://localhost:11434"
+    # Nova settings
+    nova_model_id: str = "us.amazon.nova-pro-v1:0"
+    nova_temperature: float = 0.7
+    nova_max_tokens: int = 4096
+    nova_top_p: float = 0.9
     # Response settings
     max_response_chars: int = 1800
     # LocalAgent framework settings
@@ -52,8 +57,8 @@ def load_settings() -> Settings:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
     backend_mode = os.getenv("BACKEND_MODE", "agentcore").lower()
-    if backend_mode not in {"agentcore", "ollama"}:
-        raise RuntimeError("BACKEND_MODE must be 'agentcore' or 'ollama'")
+    if backend_mode not in {"agentcore", "ollama", "nova"}:
+        raise RuntimeError("BACKEND_MODE must be 'agentcore', 'ollama', or 'nova'")
 
     if backend_mode == "agentcore":
         # Minimal required for AgentCore path
@@ -66,6 +71,11 @@ def load_settings() -> Settings:
     if backend_mode == "ollama":
         if not os.getenv("OLLAMA_MODEL"):
             raise RuntimeError("OLLAMA_MODEL is required for Ollama backend")
+    
+    # Nova validation
+    if backend_mode == "nova":
+        if not os.getenv("AWS_REGION"):
+            raise RuntimeError("AWS_REGION is required for Nova backend")
 
     prompt_profile = os.getenv("PROMPT_PROFILE", "default")
     prompt_root_env = os.getenv("PROMPT_ROOT")
@@ -90,6 +100,10 @@ def load_settings() -> Settings:
         knowledge_base_id=os.getenv("KNOWLEDGE_BASE_ID"),
         ollama_model=os.getenv("OLLAMA_MODEL"),
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        nova_model_id=os.getenv("NOVA_MODEL_ID", "us.amazon.nova-pro-v1:0"),
+        nova_temperature=float(os.getenv("NOVA_TEMPERATURE", "0.7")),
+        nova_max_tokens=int(os.getenv("NOVA_MAX_TOKENS", "4096")),
+        nova_top_p=float(os.getenv("NOVA_TOP_P", "0.9")),
         max_response_chars=int(os.getenv("MAX_RESPONSE_CHARS", "1800")),
         memory_max_messages=int(os.getenv("MEMORY_MAX_MESSAGES", "50")),
         system_prompt=os.getenv("SYSTEM_PROMPT"),

@@ -1,19 +1,22 @@
 # Mike et al Community Bot
 
-Discord community bot that can answer questions using either:
+Discord community bot that can answer questions using:
 
-1. **AWS AgentCore (Strands agent with RAG / Knowledge Base)**
-2. **Local Ollama model** for quick local experimentation
+1. **AWS Bedrock Nova-Pro** - Amazon's latest foundation model with advanced reasoning
+2. **AWS AgentCore (Strands agent with RAG / Knowledge Base)** - Production agent framework
+3. **Local Ollama model** - Quick local experimentation
 
 The bot watches a single configured Discord channel and replies to each user message with the selected backend's response.
 
 ## Features
 
-- Dual backend: `AgentCore` (production) or `Ollama` (local dev)
+- Triple backend support: `Nova` (AWS Bedrock), `AgentCore` (production), or `Ollama` (local dev)
+- **Nova Backend**: Direct AWS Bedrock Nova-Pro integration with streaming
 - **Source Agents**: Automatically collect and update knowledge base from multiple sources
 - Simple environment-based configuration
 - Safe channel filtering (hard-coded channel ID)
 - Automatic long message splitting to respect Discord 2000 char limit
+- Conversation memory across backends
 - Lightweight abstraction layer for future tools (streaming, etc.)
 
 ## Quick Start (Ollama Local Mode)
@@ -42,6 +45,55 @@ The bot watches a single configured Discord channel and replies to each user mes
 	uv sync
 	uv run community-bot
 	```
+
+## Nova Mode (AWS Bedrock Nova-Pro)
+
+**NEW!** Use Amazon's latest Nova-Pro foundation model directly:
+
+Prerequisites:
+- AWS account with Bedrock access
+- Nova-Pro model access enabled (request in Bedrock console)
+- IAM credentials configured locally
+
+Configure `.env`:
+```env
+BACKEND_MODE=nova
+DISCORD_BOT_TOKEN=your_discord_bot_token
+DISCORD_CHANNEL_ID=123456789012345678
+AWS_REGION=us-east-1
+
+# Optional Nova settings (defaults shown)
+NOVA_MODEL_ID=us.amazon.nova-pro-v1:0
+NOVA_TEMPERATURE=0.7
+NOVA_MAX_TOKENS=4096
+NOVA_TOP_P=0.9
+```
+
+Run:
+```bash
+uv sync
+uv run community-bot
+```
+
+**Features**:
+- ✅ Streaming responses for real-time output
+- ✅ Conversation memory (configurable)
+- ✅ Advanced reasoning capabilities
+- ✅ Cost-effective compared to Claude
+- ✅ Managed AWS infrastructure
+
+**Testing**:
+```powershell
+# Test connectivity
+uv run python test_nova_connection.py
+
+# Full integration test
+uv run python test_nova_integration.py
+```
+
+**Documentation**:
+- 📚 **[Nova Setup Guide](docs/NOVA_SETUP.md)** - Complete setup instructions
+- 💰 **Cost**: ~$53/month for moderate usage (1000 msgs/day)
 
 ## AgentCore Mode (AWS Bedrock)
 
