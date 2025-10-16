@@ -41,7 +41,7 @@ from community_bot.prompt_loader import load_prompt_bundle
 # --- Model Configuration ---
 # This is where we can switch between Ollama and Bedrock
 # When called from agent_client with agentcore mode, we'll use Ollama with the settings configuration
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama")  # 'ollama' or 'bedrock'
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "bedrock")  # 'ollama' or 'bedrock'
 
 # Allow overriding via function parameter for agent_client integration
 _force_provider = None
@@ -895,15 +895,18 @@ def get_agent():
                 raise
                 
         elif provider == "bedrock":
-            # Configure for Bedrock (e.g., Claude)
-            model_id = "anthropic.claude-3-sonnet-20240229-v1:0"
+            # Configure for Bedrock (Nova Pro or other models)
+            model_id = settings.bedrock_model_id
             logger.info(f"[AGENT INIT] Configuring Bedrock model: {model_id}")
+            logger.info(f"[AGENT INIT] Temperature: {settings.bedrock_temperature}")
+            logger.info(f"[AGENT INIT] Max tokens: {settings.bedrock_max_tokens}")
+            logger.info(f"[AGENT INIT] Streaming: {settings.bedrock_streaming}")
             
             try:
                 model = BedrockModel(
                     model_id=model_id,
-                    temperature=0.3,
-                    streaming=True
+                    temperature=settings.bedrock_temperature,
+                    streaming=settings.bedrock_streaming
                 )
                 logger.info("[AGENT INIT] ✅ Bedrock model configured successfully")
             except Exception as e:

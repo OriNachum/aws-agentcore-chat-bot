@@ -39,6 +39,11 @@ class Settings:
     source_agents_data_source_id: Optional[str] = None
     source_agents_run_on_startup: bool = False
     source_agents_interval: int = 3600  # seconds
+    # Bedrock model settings (for agentcore with bedrock)
+    bedrock_model_id: str = "us.amazon.nova-pro-v1:0"
+    bedrock_temperature: float = 0.7
+    bedrock_max_tokens: int = 4096
+    bedrock_streaming: bool = True
 
 
 REQUIRED_BASE = ["DISCORD_BOT_TOKEN", "DISCORD_CHANNEL_ID", "BACKEND_MODE"]
@@ -104,4 +109,9 @@ def load_settings() -> Settings:
         source_agents_data_source_id=os.getenv("SOURCE_AGENTS_DATA_SOURCE_ID"),
         source_agents_run_on_startup=os.getenv("SOURCE_AGENTS_RUN_ON_STARTUP", "false").lower() == "true",
         source_agents_interval=int(os.getenv("SOURCE_AGENTS_INTERVAL", "3600")),
+        # Bedrock model settings
+        bedrock_model_id=os.getenv("BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0"),
+        bedrock_temperature=float(os.getenv("BEDROCK_TEMPERATURE", "0.7")),
+        bedrock_max_tokens=int(os.getenv("BEDROCK_MAX_TOKENS", "4096")),
+        bedrock_streaming=os.getenv("BEDROCK_STREAMING", "true").lower() == "true",
     )

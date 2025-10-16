@@ -1,20 +1,25 @@
 # Mike et al Community Bot
 
-Discord community bot that can answer questions using either:
+Discord community bot that can answer questions using multiple AI backends:
 
-1. **AWS AgentCore (Strands agent with RAG / Knowledge Base)**
-2. **Local Ollama model** for quick local experimentation
+1. **AWS Bedrock (AgentCore mode)** - Amazon Nova Pro, Claude, or other Bedrock models
+2. **Local Ollama** - For local development and experimentation
 
 The bot watches a single configured Discord channel and replies to each user message with the selected backend's response.
 
 ## Features
 
-- Dual backend: `AgentCore` (production) or `Ollama` (local dev)
+- **Multiple AI Backends**: 
+  - 🚀 **Amazon Nova Pro** (latest AWS model via Bedrock)
+  - 🤖 **Claude 3** (via AWS Bedrock)
+  - 💻 **Ollama** (local models)
+- **AgentCore Framework**: Production-ready agent system using Strands
+- **Knowledge Base Integration**: RAG with AWS Bedrock Knowledge Base
 - **Source Agents**: Automatically collect and update knowledge base from multiple sources
-- Simple environment-based configuration
-- Safe channel filtering (hard-coded channel ID)
-- Automatic long message splitting to respect Discord 2000 char limit
-- Lightweight abstraction layer for future tools (streaming, etc.)
+- **Streaming Responses**: Real-time response streaming
+- **Simple Configuration**: Environment-based setup
+- **Safe Channel Filtering**: Hard-coded channel ID for security
+- **Automatic Message Splitting**: Respects Discord 2000 char limit
 
 ## Quick Start (Ollama Local Mode)
 
@@ -43,21 +48,43 @@ The bot watches a single configured Discord channel and replies to each user mes
 	uv run community-bot
 	```
 
-## AgentCore Mode (AWS Bedrock)
+## AgentCore Mode with Amazon Nova Pro (Recommended)
+
+### Quick Setup
+
+```powershell
+# 1. Run interactive setup
+.\setup_nova_pro.ps1
+
+# 2. Test configuration
+uv run python test_nova_pro.py
+
+# 3. Start the bot
+uv run community-bot
+```
+
+📖 **[Full Nova Pro Setup Guide](NOVA_QUICK_START.md)** - Complete documentation
+
+### Manual Configuration
 
 Prerequisites:
-- AWS account with Bedrock + AgentCore access in region you plan to use
-- Created Bedrock Agent with an Alias (and optionally Knowledge Base for RAG)
-- IAM credentials available locally (e.g., via `aws configure`, SSO, or environment vars)
+- AWS account with Bedrock access
+- Amazon Nova Pro enabled in Bedrock Console
+- IAM credentials configured (`aws configure` or environment vars)
 
 Configure `.env`:
 ```env
 BACKEND_MODE=agentcore
+LLM_PROVIDER=bedrock
 DISCORD_BOT_TOKEN=your_discord_bot_token
 DISCORD_CHANNEL_ID=123456789012345678
 AWS_REGION=us-east-1
-AGENT_ID=your_agent_id
-AGENT_ALIAS_ID=your_agent_alias_id
+
+# Nova Pro Configuration (optional - these are defaults)
+BEDROCK_MODEL_ID=us.amazon.nova-pro-v1:0
+BEDROCK_TEMPERATURE=0.7
+BEDROCK_MAX_TOKENS=4096
+BEDROCK_STREAMING=true
 
 # Optional: AWS Bedrock Knowledge Base
 KNOWLEDGE_BASE_ID=your_kb_id
@@ -69,6 +96,17 @@ Run:
 uv sync
 uv run community-bot
 ```
+
+### Available Bedrock Models
+
+Change `BEDROCK_MODEL_ID` to use different models:
+
+| Model | ID | Best For |
+|-------|-----|----------|
+| **Nova Pro** | `us.amazon.nova-pro-v1:0` | Advanced reasoning (recommended) |
+| **Nova Lite** | `us.amazon.nova-lite-v1:0` | Balanced performance |
+| **Nova Micro** | `us.amazon.nova-micro-v1:0` | Fast, simple tasks |
+| **Claude 3.5 Sonnet** | `anthropic.claude-3-5-sonnet-20240620-v1:0` | Alternative option |
 
 ### AWS Bedrock Knowledge Base Integration
 
