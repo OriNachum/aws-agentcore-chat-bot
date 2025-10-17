@@ -39,17 +39,11 @@ from community_bot.logging_config import setup_logging, get_logger
 from community_bot.prompt_loader import load_prompt_bundle
 
 # --- Model Configuration ---
-# This is where we can switch between Ollama and Bedrock
-# When called from agent_client with agentcore mode, we'll use Ollama with the settings configuration
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "bedrock")  # 'ollama' or 'bedrock'
-
+# LLM provider is now configured through settings (from LLM_PROVIDER env var)
 # Allow overriding via function parameter for agent_client integration
-_force_provider = None
 
-def set_provider(provider: str):
+def set_provider():
     """Set the provider for this session (used by agent_client)."""
-    global _force_provider
-    _force_provider = provider
 
 # Load application settings
 settings = load_settings()
@@ -75,7 +69,7 @@ except Exception:  # Propagate after logging for visibility
 
 _PROMPT_USER_ROLE = (settings.prompt_user_role or "user").strip() or "user"
 
-logger.info(f"Initializing AgentCore app with LLM provider: {LLM_PROVIDER}")
+logger.info(f"Initializing AgentCore app with LLM provider: {settings.llm_provider}")
 logger.info(f"AgentCore services available: {AGENTCORE_SERVICES_AVAILABLE}")
 
 # Initialize AgentCore application
@@ -870,12 +864,12 @@ def get_agent():
         logger.info("[AGENT INIT] Initializing Strands Agent...")
         logger.info("=" * 80)
         
-        # Use forced provider if set, otherwise use environment variable
-        provider = _force_provider or LLM_PROVIDER
+        # Use forced provider if set, otherwise use settings
+        provider = settings.llm_provider
         
         logger.info(f"[AGENT INIT] LLM Provider: {provider}")
         logger.info(f"[AGENT INIT] Forced provider: {_force_provider}")
-        logger.info(f"[AGENT INIT] Environment LLM_PROVIDER: {LLM_PROVIDER}")
+        logger.info(f"[AGENT INIT] Settings LLM Provider: {settings.llm_provider}")
         
         if provider == "ollama":
             # Assumes Ollama is running locally

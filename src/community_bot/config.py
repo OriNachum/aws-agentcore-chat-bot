@@ -18,6 +18,8 @@ class Settings:
     agent_id: Optional[str] = None  # AgentCore Agent / Knowledge Base identifier
     agent_alias_id: Optional[str] = None
     knowledge_base_id: Optional[str] = None
+    # LLM Provider (for agentcore mode)
+    llm_provider: str = "bedrock"  # 'ollama' or 'bedrock'
     # Ollama settings (enhanced for LocalAgent framework)
     ollama_model: Optional[str] = None
     ollama_base_url: str = "http://localhost:11434"
@@ -93,6 +95,7 @@ def load_settings() -> Settings:
         agent_id=os.getenv("AGENT_ID"),
         agent_alias_id=os.getenv("AGENT_ALIAS_ID"),
         knowledge_base_id=os.getenv("KNOWLEDGE_BASE_ID"),
+        llm_provider=os.getenv("LLM_PROVIDER", "bedrock"),
         ollama_model=os.getenv("OLLAMA_MODEL"),
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         max_response_chars=int(os.getenv("MAX_RESPONSE_CHARS", "1800")),
