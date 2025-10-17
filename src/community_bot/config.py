@@ -18,6 +18,8 @@ class Settings:
     agent_id: Optional[str] = None  # AgentCore Agent / Knowledge Base identifier
     agent_alias_id: Optional[str] = None
     knowledge_base_id: Optional[str] = None
+    # LLM Provider (for agentcore mode)
+    llm_provider: str = "bedrock"  # 'ollama' or 'bedrock'
     # Ollama settings (enhanced for LocalAgent framework)
     ollama_model: Optional[str] = None
     ollama_base_url: str = "http://localhost:11434"
@@ -39,6 +41,13 @@ class Settings:
     source_agents_data_source_id: Optional[str] = None
     source_agents_run_on_startup: bool = False
     source_agents_interval: int = 3600  # seconds
+    # Bedrock model settings (for agentcore with bedrock)
+    bedrock_model_id: str = "us.amazon.nova-pro-v1:0"
+    bedrock_temperature: float = 0.7
+    bedrock_max_tokens: int = 4096
+    bedrock_streaming: bool = True
+    bedrock_read_timeout: int = 300  # 5 minutes for long streams
+    bedrock_connect_timeout: int = 60  # 1 minute to establish connection
 
 
 REQUIRED_BASE = ["DISCORD_BOT_TOKEN", "DISCORD_CHANNEL_ID", "BACKEND_MODE"]
@@ -88,6 +97,7 @@ def load_settings() -> Settings:
         agent_id=os.getenv("AGENT_ID"),
         agent_alias_id=os.getenv("AGENT_ALIAS_ID"),
         knowledge_base_id=os.getenv("KNOWLEDGE_BASE_ID"),
+        llm_provider=os.getenv("LLM_PROVIDER", "bedrock"),
         ollama_model=os.getenv("OLLAMA_MODEL"),
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         max_response_chars=int(os.getenv("MAX_RESPONSE_CHARS", "1800")),
@@ -104,4 +114,11 @@ def load_settings() -> Settings:
         source_agents_data_source_id=os.getenv("SOURCE_AGENTS_DATA_SOURCE_ID"),
         source_agents_run_on_startup=os.getenv("SOURCE_AGENTS_RUN_ON_STARTUP", "false").lower() == "true",
         source_agents_interval=int(os.getenv("SOURCE_AGENTS_INTERVAL", "3600")),
+        # Bedrock model settings
+        bedrock_model_id=os.getenv("BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0"),
+        bedrock_temperature=float(os.getenv("BEDROCK_TEMPERATURE", "0.7")),
+        bedrock_max_tokens=int(os.getenv("BEDROCK_MAX_TOKENS", "4096")),
+        bedrock_streaming=os.getenv("BEDROCK_STREAMING", "true").lower() == "true",
+        bedrock_read_timeout=int(os.getenv("BEDROCK_READ_TIMEOUT", "300")),
+        bedrock_connect_timeout=int(os.getenv("BEDROCK_CONNECT_TIMEOUT", "60")),
     )

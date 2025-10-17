@@ -55,8 +55,8 @@ class AgentClient:
             # Import here to set the provider for this session
             from .agentcore_app import set_provider
             
-            # Force the agentcore_app to use Ollama with our settings
-            set_provider("ollama")
+            # 
+            set_provider()
             
             logger.debug(f"Ollama model: {settings.ollama_model}")
             logger.debug(f"Ollama base URL: {settings.ollama_base_url}")
