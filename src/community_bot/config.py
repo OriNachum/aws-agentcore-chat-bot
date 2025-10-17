@@ -46,6 +46,8 @@ class Settings:
     bedrock_temperature: float = 0.7
     bedrock_max_tokens: int = 4096
     bedrock_streaming: bool = True
+    bedrock_read_timeout: int = 300  # 5 minutes for long streams
+    bedrock_connect_timeout: int = 60  # 1 minute to establish connection
 
 
 REQUIRED_BASE = ["DISCORD_BOT_TOKEN", "DISCORD_CHANNEL_ID", "BACKEND_MODE"]
@@ -117,4 +119,6 @@ def load_settings() -> Settings:
         bedrock_temperature=float(os.getenv("BEDROCK_TEMPERATURE", "0.7")),
         bedrock_max_tokens=int(os.getenv("BEDROCK_MAX_TOKENS", "4096")),
         bedrock_streaming=os.getenv("BEDROCK_STREAMING", "true").lower() == "true",
+        bedrock_read_timeout=int(os.getenv("BEDROCK_READ_TIMEOUT", "300")),
+        bedrock_connect_timeout=int(os.getenv("BEDROCK_CONNECT_TIMEOUT", "60")),
     )

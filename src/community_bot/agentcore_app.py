@@ -5,6 +5,9 @@ import os
 import sys
 import requests
 import boto3
+import time
+from botocore.config import Config
+from urllib3.exceptions import ProtocolError
 from botocore.exceptions import BotoCoreError, ClientError
 
 from pathlib import Path
@@ -868,7 +871,6 @@ def get_agent():
         provider = settings.llm_provider
         
         logger.info(f"[AGENT INIT] LLM Provider: {provider}")
-        logger.info(f"[AGENT INIT] Forced provider: {_force_provider}")
         logger.info(f"[AGENT INIT] Settings LLM Provider: {settings.llm_provider}")
         
         if provider == "ollama":
@@ -895,14 +897,27 @@ def get_agent():
             logger.info(f"[AGENT INIT] Temperature: {settings.bedrock_temperature}")
             logger.info(f"[AGENT INIT] Max tokens: {settings.bedrock_max_tokens}")
             logger.info(f"[AGENT INIT] Streaming: {settings.bedrock_streaming}")
+            logger.info(f"[AGENT INIT] Read timeout: {settings.bedrock_read_timeout}s")
+            logger.info(f"[AGENT INIT] Connect timeout: {settings.bedrock_connect_timeout}s")
             
             try:
+                # Configure boto3 client with proper timeouts
+                boto_config = Config(
+                    read_timeout=settings.bedrock_read_timeout,
+                    connect_timeout=settings.bedrock_connect_timeout,
+                    retries={
+                        'max_attempts': 3,
+                        'mode': 'adaptive'
+                    }
+                )
+                
                 model = BedrockModel(
                     model_id=model_id,
                     temperature=settings.bedrock_temperature,
-                    streaming=settings.bedrock_streaming
+                    streaming=settings.bedrock_streaming,
+                    config=boto_config
                 )
-                logger.info("[AGENT INIT] ✅ Bedrock model configured successfully")
+                logger.info("[AGENT INIT] ✅ Bedrock model configured successfully with timeout protection")
             except Exception as e:
                 logger.error(f"[AGENT INIT] ❌ Failed to configure Bedrock model: {e}", exc_info=True)
                 raise
@@ -925,6 +940,82 @@ def get_agent():
         logger.debug("[AGENT INIT] Using existing agent instance")
     
     return _agent
+
+
+def _invoke_agent_with_retry(agent, message: str, max_retries: int = 3, base_delay: float = 1.0):
+    """
+    Invoke the agent with retry logic for handling transient network errors.
+    
+    Args:
+        agent: The Strands Agent instance
+        message: The message to send to the agent
+        max_retries: Maximum number of retry attempts (default: 3)
+        base_delay: Base delay in seconds for exponential backoff (default: 1.0)
+    
+    Returns:
+        The agent's response
+    
+    Raises:
+        Exception: If all retry attempts fail
+    """
+    last_exception = None
+    
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"[AGENT INVOKE] Attempt {attempt + 1}/{max_retries}")
+            logger.info("=" * 80)
+            result = agent(message)
+            logger.info("=" * 80)
+            logger.info("[AGENT INVOKE] ✅ Agent invocation succeeded")
+            return result
+            
+        except ProtocolError as e:
+            last_exception = e
+            error_msg = str(e)
+            logger.warning(f"[AGENT INVOKE] ⚠️ Network error on attempt {attempt + 1}/{max_retries}: {error_msg}")
+            
+            if attempt < max_retries - 1:
+                # Calculate exponential backoff delay
+                delay = base_delay * (2 ** attempt)
+                logger.info(f"[AGENT INVOKE] Retrying in {delay:.1f} seconds...")
+                time.sleep(delay)
+            else:
+                logger.error(f"[AGENT INVOKE] ❌ All {max_retries} attempts failed with network errors")
+                
+        except (BotoCoreError, ClientError) as e:
+            last_exception = e
+            error_msg = str(e)
+            logger.warning(f"[AGENT INVOKE] ⚠️ AWS error on attempt {attempt + 1}/{max_retries}: {error_msg}")
+            
+            # For AWS errors, check if it's a throttling error
+            is_throttling = False
+            if isinstance(e, ClientError):
+                is_throttling = e.response.get('Error', {}).get('Code') == 'ThrottlingException'
+            
+            if is_throttling:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.info(f"[AGENT INVOKE] Throttled - retrying in {delay:.1f} seconds...")
+                    time.sleep(delay)
+                else:
+                    logger.error(f"[AGENT INVOKE] ❌ All {max_retries} attempts failed with throttling")
+            else:
+                # For non-throttling AWS errors, don't retry
+                logger.error(f"[AGENT INVOKE] ❌ Non-retryable AWS error: {error_msg}")
+                raise
+                
+        except Exception as e:
+            # For unexpected errors, log and re-raise immediately
+            logger.error(f"[AGENT INVOKE] ❌ Unexpected error: {e}", exc_info=True)
+            raise
+    
+    # If we've exhausted all retries, raise the last exception
+    logger.error(f"[AGENT INVOKE] ❌ Failed after {max_retries} attempts")
+    if last_exception:
+        raise last_exception
+    else:
+        raise RuntimeError(f"Agent invocation failed after {max_retries} attempts")
+
 
 def chat_with_agent(user_message: str, session_id: Optional[str] = None, use_knowledge_base: bool = True) -> str:
     """
@@ -1020,11 +1111,9 @@ def chat_with_agent(user_message: str, session_id: Optional[str] = None, use_kno
         logger.debug(f"[CHAT] FULL QUERY TO MODEL:\n{enhanced_message}")
         logger.debug("=" * 80)
 
-        # Process with the agent
-        logger.info("[CHAT] Invoking Strands agent...")
-        logger.info("=" * 80)
-        result = agent(enhanced_message)
-        logger.info("=" * 80)
+        # Process with the agent (with retry logic for network errors)
+        logger.info("[CHAT] Invoking Strands agent with retry logic...")
+        result = _invoke_agent_with_retry(agent, enhanced_message, max_retries=3, base_delay=1.0)
         logger.info("[CHAT] Agent invocation completed")
         
         # Log the result object details
@@ -1070,11 +1159,27 @@ def chat_with_agent(user_message: str, session_id: Optional[str] = None, use_kno
         logger.info("=" * 80)
         return response_text
         
+    except ProtocolError as e:
+        logger.error("=" * 80)
+        logger.error(f"[CHAT] ❌ Network error after retries: {e}", exc_info=True)
+        logger.error("=" * 80)
+        return "I apologize, but I'm experiencing network connectivity issues with the AI service. This is a temporary problem - please try again in a moment."
+        
+    except (BotoCoreError, ClientError) as e:
+        logger.error("=" * 80)
+        logger.error(f"[CHAT] ❌ AWS service error: {e}", exc_info=True)
+        logger.error("=" * 80)
+        error_msg = str(e)
+        if 'ThrottlingException' in error_msg or 'throttl' in error_msg.lower():
+            return "I'm currently experiencing high demand. Please wait a moment and try again."
+        else:
+            return f"I encountered an AWS service error: {error_msg[:200]}"
+    
     except Exception as e:
         logger.error("=" * 80)
-        logger.error(f"[CHAT] ❌ Error processing request: {e}", exc_info=True)
+        logger.error(f"[CHAT] ❌ Unexpected error processing request: {e}", exc_info=True)
         logger.error("=" * 80)
-        return f"I encountered an error while processing your request: {str(e)}"
+        return f"I encountered an unexpected error while processing your request: {str(e)}"
 
 def main():
     """Main function for testing the agent locally."""
