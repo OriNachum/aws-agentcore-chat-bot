@@ -67,9 +67,6 @@ class CommunityBot(discord.Client):
         else:
             # We're in the main channel - create (or reuse) a thread for the response
             logger.debug("Message is in main channel - will create (or reuse) thread")
-            thread_name = f"Chat with {message.author.display_name}"
-            if len(message.content) > 50:
-                thread_name = f"Re: {message.content[:50]}..."
 
             existing_thread = await self._resolve_existing_thread(message)
             if existing_thread:
@@ -79,6 +76,12 @@ class CommunityBot(discord.Client):
                     extra={"thread_id": existing_thread.id, "message_id": message.id},
                 )
             else:
+                # Generate thread name using the agent
+                thread_name = await self._generate_thread_name(
+                    message.content, 
+                    message.author.display_name
+                )
+                
                 try:
                     response_channel = await message.create_thread(name=thread_name)
                     logger.debug(f"Created thread: {thread_name}")
@@ -432,3 +435,50 @@ class CommunityBot(discord.Client):
                 return getattr(refreshed, "thread", None)
 
         return None
+    
+    async def _generate_thread_name(self, user_message: str, author_name: str) -> str:
+        """Generate a thread name using the agent for inference."""
+        try:
+            logger.debug(f"Requesting thread name from agent for message: {user_message[:100]}...")
+            
+            # Create a prompt for the agent to generate a concise thread title
+            prompt = f"""Generate a short, descriptive thread title (maximum 100 characters) for this Discord conversation starter:
+
+"{user_message}"
+
+Rules:
+- Keep it under 100 characters
+- Make it descriptive and relevant to the message content
+- Don't include quotes or special formatting
+- Use title case
+- Be concise and clear
+
+Respond with ONLY the thread title, nothing else."""
+
+            # Collect the agent's response
+            full_response = ""
+            async for chunk in self.agent_client.chat(prompt):
+                full_response += chunk
+            
+            # Clean up the response - remove quotes, extra whitespace, etc.
+            # Take only the first line if multiple lines are returned
+            thread_name = full_response.strip().split('\n')[0].strip().strip('"').strip("'").strip()
+            
+            # Ensure it's not too long (Discord limit is 100 characters)
+            if len(thread_name) > 100:
+                thread_name = thread_name[:97] + "..."
+            
+            # If for some reason we got an empty response, fall back to default
+            if not thread_name:
+                logger.warning("Agent returned empty thread name, using fallback")
+                thread_name = f"Chat with {author_name}"
+            
+            logger.info(f"Generated thread name: {thread_name}")
+            return thread_name
+            
+        except Exception as e:
+            logger.error(f"Failed to generate thread name with agent: {e}", exc_info=True)
+            # Fallback to simple naming scheme
+            fallback_name = f"Chat with {author_name}"
+            logger.info(f"Using fallback thread name: {fallback_name}")
+            return fallback_name

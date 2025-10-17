@@ -1,6 +1,17 @@
 # Changelog
 
-## [Unreleased] - 2025-10-04
+## [Unreleased] - 2025-10-17
+
+### Added
+- **AI-Generated Thread Names** - Discord threads now have intelligent, context-aware names
+  - Bot uses the same AI agent to generate descriptive thread titles based on message content
+  - Automatic fallback to simple naming scheme on errors
+  - Supports both Ollama and Bedrock backends
+  - Respects Discord's 100-character limit
+  - Adds ~1-3 seconds to new thread creation (no impact on existing threads)
+  - See `docs/AI_GENERATED_THREAD_NAMES.md` for details
+
+## [Previous] - 2025-10-04
 
 ### Fixed
 - **AWS Bedrock Knowledge Base Integration** - Complete rewrite of KB query mechanism
