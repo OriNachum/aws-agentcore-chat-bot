@@ -1,4 +1,7 @@
-# Mike et al Community Bot
+<img width="1057" height="494" alt="image" src="https://github.com/user-attachments/assets/3c37a96e-c09c-42ee-bcb1-9e0d088ad82a" />
+
+
+# Mike Science Bot
 
 Discord community bot that can answer questions using multiple AI backends:
 
